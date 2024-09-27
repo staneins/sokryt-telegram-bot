@@ -3,6 +3,7 @@ package com.kaminsky.service;
 import com.kaminsky.config.BotConfig;
 import com.kaminsky.model.User;
 import com.kaminsky.model.UserRepository;
+import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -87,7 +88,7 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
 
     private void startCommandReceived(long chatId, String name) {
-        String answer = "Доброго здоровья, " + name + "!";
+        String answer = EmojiParser.parseToUnicode("Доброго здоровья, " + name + "!" + " :smiley:");
         sendMessage(chatId, answer);
         log.info("Ответил пользователю " + name);
     }
