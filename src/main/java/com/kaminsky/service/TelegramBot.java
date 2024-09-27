@@ -20,6 +20,9 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     final BotConfig config;
 
+    static final String HELP_TEXT = "Этот бот пока ничего не умеет, кроме приветствий.\n" +
+                                    "Вы можете увидеть список будущих команд в меню слева.";
+
     public TelegramBot(BotConfig config) {
         this.config = config;
         List<BotCommand> listOfCommands = new ArrayList<>();
@@ -45,6 +48,9 @@ public class TelegramBot extends TelegramLongPollingBot {
             switch (messageText) {
                 case "/start":
                         startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
+                        break;
+                case "/help":
+                        sendMessage(chatId, HELP_TEXT);
                         break;
                 default:
                         sendMessage(chatId, "Прости, мне незнакома эта команда");
