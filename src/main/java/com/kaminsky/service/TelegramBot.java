@@ -10,12 +10,16 @@ import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Chat;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeDefault;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
@@ -65,11 +69,77 @@ public class TelegramBot extends TelegramLongPollingBot {
                 case "/help":
                         sendMessage(chatId, HELP_TEXT);
                         break;
+//                case "/register":
+//                        register(chatId);
                 default:
                         sendMessage(chatId, "Прости, мне незнакома эта команда");
 
             }
+        } else if (update.hasCallbackQuery()) {
+            String callbackData = update.getCallbackQuery().getData();
+            long messageId = update.getCallbackQuery().getMessage().getMessageId();
+            long chatId = update.getCallbackQuery().getMessage().getChatId();
+
+            if (callbackData.equals("YES_BUTTON")) {
+                String text = "Вы нажали кнопку ДА";
+                EditMessageText message = new EditMessageText();
+                message.setChatId(chatId);
+                message.setText(text);
+                message.setMessageId((int) messageId);
+                try {
+                    execute(message);
+                } catch (TelegramApiException e) {
+                    log.error("Ошибка: " + e.getMessage());
+                }
+
+            } else if (callbackData.equals("NO_BUTTON")) {
+                String text = "Вы нажали кнопку НЕТ";
+                EditMessageText message = new EditMessageText();
+                message.setChatId(chatId);
+                message.setText(text);
+                message.setMessageId((int) messageId);
+                try {
+                    execute(message);
+                } catch (TelegramApiException e) {
+                    log.error("Ошибка: " + e.getMessage());
+                }
+            }
         }
+    }
+
+    private void register(Long chatId) {
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId.toString());
+        message.setText("Вы действительно хотите зарегистрироваться?");
+
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+        InlineKeyboardButton yesButton = new InlineKeyboardButton();
+
+        yesButton.setText("Да");
+        yesButton.setCallbackData("YES_BUTTON");
+
+        InlineKeyboardButton noButton = new InlineKeyboardButton();
+
+        noButton.setText("Нет");
+        noButton.setCallbackData("NO_BUTTON");
+
+        rowInLine.add(yesButton);
+        rowInLine.add(noButton);
+
+        rows.add(rowInLine);
+
+        markup.setKeyboard(rows);
+
+        message.setReplyMarkup(markup);
+
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            log.error("Ошибка: " + e.getMessage());
+        }
+
     }
 
     private void registerUser(Message message) {
@@ -100,26 +170,26 @@ public class TelegramBot extends TelegramLongPollingBot {
         message.setChatId(chatId);
         message.setText(textToSend);
 
-        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
-        List<KeyboardRow> keyboardRows = new ArrayList<>();
-        KeyboardRow row = new KeyboardRow();
-
-        row.add("петиция о разбане");
-        row.add("сайт проекта");
-
-        keyboardRows.add(row);
-
-        row = new KeyboardRow();
-
-        row.add("FAQ о Единоверии");
-        row.add("карта приходов");
-        row.add("обучение");
-
-        keyboardRows.add(row);
-
-        keyboardMarkup.setKeyboard(keyboardRows);
-
-        message.setReplyMarkup(keyboardMarkup);
+//        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+//        List<KeyboardRow> keyboardRows = new ArrayList<>();
+//        KeyboardRow row = new KeyboardRow();
+//
+//        row.add("петиция о разбане");
+//        row.add("сайт проекта");
+//
+//        keyboardRows.add(row);
+//
+//        row = new KeyboardRow();
+//
+//        row.add("FAQ о Единоверии");
+//        row.add("карта приходов");
+//        row.add("обучение");
+//
+//        keyboardRows.add(row);
+//
+//        keyboardMarkup.setKeyboard(keyboardRows);
+//
+//        message.setReplyMarkup(keyboardMarkup);
 
         try {
             execute(message);
