@@ -1,11 +1,13 @@
 package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
+import com.kaminsky.model.AdRepository;
 import com.kaminsky.model.User;
 import com.kaminsky.model.UserRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
@@ -33,6 +35,9 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private AdRepository adRepository;
 
     final BotConfig config;
 
@@ -208,6 +213,11 @@ public class TelegramBot extends TelegramLongPollingBot {
         message.setChatId(chatId);
         message.setText(textToSend);
         executeMessage(message);
+    }
+
+    @Scheduled(cron = "* * * * * *")
+    private void sendAd(){
+
     }
 
     @Override
