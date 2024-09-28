@@ -39,6 +39,9 @@ public class TelegramBot extends TelegramLongPollingBot {
     static final String HELP_TEXT = "Этот бот пока ничего не умеет, кроме приветствий.\n" +
                                     "Вы можете увидеть список будущих команд в меню слева.";
 
+    static final String YES_BUTTON = "YES_BUTTON";
+    static final String NO_BUTTON = "NO_BUTTON";
+
     public TelegramBot(BotConfig config) {
         this.config = config;
         List<BotCommand> listOfCommands = new ArrayList<>();
@@ -65,53 +68,37 @@ public class TelegramBot extends TelegramLongPollingBot {
                 String textToSend = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
                 Iterable<User> users = userRepository.findAll();
                 for (User user : users) {
-                    sendMessage(user.getChatId(), textToSend);
+                    prepareAndSendMessage(user.getChatId(), textToSend);
                 }
-            }
+            } else {
 
             switch (messageText) {
                 case "/start":
-                        registerUser(update.getMessage());
-                        startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
-                        break;
+                    registerUser(update.getMessage());
+                    startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
+                    break;
                 case "/help":
-                        sendMessage(chatId, HELP_TEXT);
-                        break;
+                    prepareAndSendMessage(chatId, HELP_TEXT);
+                    break;
                 case "/register":
-                        register(chatId);
-                        break;
+                    register(chatId);
+                    break;
                 default:
-                        sendMessage(chatId, "Прости, мне незнакома эта команда");
-
+                    prepareAndSendMessage(chatId, "Прости, мне незнакома эта команда");
+            }
             }
         } else if (update.hasCallbackQuery()) {
             String callbackData = update.getCallbackQuery().getData();
             long messageId = update.getCallbackQuery().getMessage().getMessageId();
             long chatId = update.getCallbackQuery().getMessage().getChatId();
 
-            if (callbackData.equals("YES_BUTTON")) {
+            if (callbackData.equals(YES_BUTTON)) {
                 String text = "Вы нажали кнопку ДА";
-                EditMessageText message = new EditMessageText();
-                message.setChatId(chatId);
-                message.setText(text);
-                message.setMessageId((int) messageId);
-                try {
-                    execute(message);
-                } catch (TelegramApiException e) {
-                    log.error("Ошибка: " + e.getMessage());
-                }
+                executeEditMessageText(text, chatId, messageId);
 
-            } else if (callbackData.equals("NO_BUTTON")) {
+            } else if (callbackData.equals(NO_BUTTON)) {
                 String text = "Вы нажали кнопку НЕТ";
-                EditMessageText message = new EditMessageText();
-                message.setChatId(chatId);
-                message.setText(text);
-                message.setMessageId((int) messageId);
-                try {
-                    execute(message);
-                } catch (TelegramApiException e) {
-                    log.error("Ошибка: " + e.getMessage());
-                }
+                executeEditMessageText(text, chatId, messageId);
             }
         }
     }
@@ -127,12 +114,12 @@ public class TelegramBot extends TelegramLongPollingBot {
         InlineKeyboardButton yesButton = new InlineKeyboardButton();
 
         yesButton.setText("Да");
-        yesButton.setCallbackData("YES_BUTTON");
+        yesButton.setCallbackData(YES_BUTTON);
 
         InlineKeyboardButton noButton = new InlineKeyboardButton();
 
         noButton.setText("Нет");
-        noButton.setCallbackData("NO_BUTTON");
+        noButton.setCallbackData(NO_BUTTON);
 
         rowInLine.add(yesButton);
         rowInLine.add(noButton);
@@ -143,11 +130,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
         message.setReplyMarkup(markup);
 
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Ошибка: " + e.getMessage());
-        }
+        executeMessage(message);
 
     }
 
@@ -170,15 +153,12 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private void startCommandReceived(long chatId, String name) {
         String answer = EmojiParser.parseToUnicode("Доброго здоровья, " + name + "!" + " :smiley:");
-        sendMessage(chatId, answer);
+        prepareAndSendMessage(chatId, answer);
         log.info("Ответил пользователю " + name);
     }
 
-    private void sendMessage(long chatId, String textToSend) {
-        SendMessage message = new SendMessage();
-        message.setChatId(chatId);
-        message.setText(textToSend);
-
+//    private void keyboardMethod(long chatId, String textToSend) {
+//
 //        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
 //        List<KeyboardRow> keyboardRows = new ArrayList<>();
 //        KeyboardRow row = new KeyboardRow();
@@ -199,12 +179,35 @@ public class TelegramBot extends TelegramLongPollingBot {
 //        keyboardMarkup.setKeyboard(keyboardRows);
 //
 //        message.setReplyMarkup(keyboardMarkup);
+//
+//        executeMessage(message);
+//    }
 
+    private void executeEditMessageText(String text, long chatId, long messageId) {
+        EditMessageText message = new EditMessageText();
+        message.setChatId(chatId);
+        message.setText(text);
+        message.setMessageId((int) messageId);
         try {
             execute(message);
         } catch (TelegramApiException e) {
             log.error("Ошибка: " + e.getMessage());
         }
+    }
+
+    private void executeMessage(SendMessage message) {
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            log.error("Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void prepareAndSendMessage(long chatId, String textToSend){
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(textToSend);
+        executeMessage(message);
     }
 
     @Override
