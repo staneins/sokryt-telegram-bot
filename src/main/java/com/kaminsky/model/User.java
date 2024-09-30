@@ -18,6 +18,8 @@ public class User {
 
     private Timestamp registeredAt;
 
+    private Byte numberOfWarns;
+
     @Override
     public String toString() {
         return "User{" +
@@ -67,5 +69,13 @@ public class User {
 
     public void setChatId(Long chatId) {
         this.chatId = chatId;
+    }
+
+    public Byte getNumberOfWarns() {
+        return numberOfWarns;
+    }
+
+    public void setNumberOfWarns(Byte numberOfWarns) {
+        this.numberOfWarns = numberOfWarns;
     }
 }

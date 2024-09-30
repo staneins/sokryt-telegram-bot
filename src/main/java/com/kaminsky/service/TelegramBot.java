@@ -12,13 +12,17 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Chat;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
+import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllGroupChats;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeDefault;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
@@ -50,15 +54,21 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     public TelegramBot(BotConfig config) {
         this.config = config;
-        List<BotCommand> listOfCommands = new ArrayList<>();
-        listOfCommands.add(new BotCommand("/start", "запустить бот"));
-        listOfCommands.add(new BotCommand("/mydata", "данные о пользователе"));
-        listOfCommands.add(new BotCommand("/deletedata", "удалить данные о пользователе"));
-        listOfCommands.add(new BotCommand("/help", "описание работы бота"));
-        listOfCommands.add(new BotCommand("/settings", "установить настройки"));
+        List<BotCommand> privateChatCommands = new ArrayList<>();
+        privateChatCommands.add(new BotCommand("/start", "запустить бот"));
+        privateChatCommands.add(new BotCommand("/mydata", "данные о пользователе"));
+        privateChatCommands.add(new BotCommand("/deletedata", "удалить данные о пользователе"));
+        privateChatCommands.add(new BotCommand("/help", "описание работы бота"));
+        privateChatCommands.add(new BotCommand("/settings", "установить настройки"));
+
+        List<BotCommand> publicChatCommands = new ArrayList<>();
+        publicChatCommands.add(new BotCommand("/ban@sokrytbot", "забанить пользователя"));
+        publicChatCommands.add(new BotCommand("/mute@sokrytbot", "обеззвучить пользователя"));
+        publicChatCommands.add(new BotCommand("/warn@sokrytbot", "предупредить пользователя"));
 
         try {
-            this.execute(new SetMyCommands(listOfCommands, new BotCommandScopeDefault(), null));
+            this.execute(new SetMyCommands(privateChatCommands, new BotCommandScopeDefault(), null));
+            this.execute(new SetMyCommands(publicChatCommands, new BotCommandScopeAllGroupChats(), null));
         } catch (TelegramApiException e) {
             log.error("Ошибка при написании списка команд: " + e.getMessage());
         }
@@ -66,11 +76,24 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-        if (update.hasMessage() && update.getMessage().hasText()) {
+        String botUsername;
+
+        try {
+            botUsername = getMe().getUserName();
+        } catch (TelegramApiException e) {
+            throw new RuntimeException(e);
+        }
+
+        boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
+
+        boolean isReplyToBot = update.getMessage().isReply() &&
+                update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
+
+        if (update.hasMessage() && update.getMessage().hasText() && (isReplyToBot || update.getMessage().getText().contains("@" + botUsername))) {
             String messageText = update.getMessage().getText();
             long chatId = update.getMessage().getChatId();
 
-            if (messageText.contains("/send") && config.getOwnerId() == chatId) {
+            if (messageText.contains("/send@sokrytbot") && config.getOwnerId() == chatId) {
                 String textToSend = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
                 Iterable<User> users = userRepository.findAll();
                 for (User user : users) {
@@ -79,18 +102,25 @@ public class TelegramBot extends TelegramLongPollingBot {
             } else {
 
             switch (messageText) {
-                case "/start":
+                case "/start@sokrytbot":
                     registerUser(update.getMessage());
                     startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
                     break;
-                case "/help":
+                case "/help@sokrytbot":
                     prepareAndSendMessage(chatId, HELP_TEXT);
                     break;
-                case "/register":
+                case "/register@sokrytbot":
                     register(chatId);
                     break;
+                case "/ban@sokrytbot":
+                    banUser(update.getMessage().getChatId(), update.getMessage().getReplyToMessage().getFrom().getId(), update.getMessage().getReplyToMessage().getFrom().getFirstName());
+                    log.info("Забанили " + update.getMessage().getFrom().getUserName());
+                    break;
+                case "/warn@sokrytbot":
+
+                    break;
                 default:
-                    prepareAndSendMessage(chatId, "Прости, мне незнакома эта команда");
+                    prepareAndSendMessage(chatId, "Мне незнакома эта команда");
             }
             }
         } else if (update.hasCallbackQuery()) {
@@ -163,6 +193,34 @@ public class TelegramBot extends TelegramLongPollingBot {
         log.info("Ответил пользователю " + name);
     }
 
+    private void banUser(long chatId, long bannedUserId, String bannedUserNickname) {
+        try {
+            GetChatAdministrators getChatAdministrators = new GetChatAdministrators();
+            getChatAdministrators.setChatId(chatId);
+            List<ChatMember> administrators = execute(getChatAdministrators);
+
+            boolean isAdmin = administrators.stream()
+                    .anyMatch(admin -> admin.getUser().getId().equals(bannedUserId));
+            if (isAdmin) {
+                prepareAndSendMessage(chatId, "Не могу забанить администратора");
+            } else {
+                execute(new BanChatMember(String.valueOf(chatId), bannedUserId));
+                String text = bannedUserNickname + " уничтожен.";
+                prepareAndSendMessage(chatId, text);
+            }
+        } catch (TelegramApiException e) {
+            log.error("Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void warnUser() {
+
+    }
+
+    private void muteUser() {
+
+    }
+
 //    private void keyboardMethod(long chatId, String textToSend) {
 //
 //        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
@@ -194,6 +252,17 @@ public class TelegramBot extends TelegramLongPollingBot {
         message.setChatId(chatId);
         message.setText(text);
         message.setMessageId((int) messageId);
+        try {
+            execute(message);
+        } catch (TelegramApiException e) {
+            log.error("Ошибка: " + e.getMessage());
+        }
+    }
+
+    private void executeEditMessageText(String text, long chatId) {
+        EditMessageText message = new EditMessageText();
+        message.setChatId(chatId);
+        message.setText(text);
         try {
             execute(message);
         } catch (TelegramApiException e) {
