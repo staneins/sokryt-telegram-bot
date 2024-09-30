@@ -1,6 +1,7 @@
 package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
+import com.kaminsky.model.Ad;
 import com.kaminsky.model.AdRepository;
 import com.kaminsky.model.User;
 import com.kaminsky.model.UserRepository;
@@ -215,9 +216,16 @@ public class TelegramBot extends TelegramLongPollingBot {
         executeMessage(message);
     }
 
-    @Scheduled(cron = "* * * * * *")
+    @Scheduled(cron = "${cron.scheduler}")
     private void sendAd(){
+        Iterable<Ad> ads = adRepository.findAll();
+        Iterable<User> users = userRepository.findAll();
 
+        for (Ad ad : ads) {
+            for (User user : users) {
+                prepareAndSendMessage(user.getChatId(), ad.getAd());
+            }
+        }
     }
 
     @Override
