@@ -22,7 +22,9 @@ import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
+import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllChatAdministrators;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllGroupChats;
+import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllPrivateChats;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeDefault;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
@@ -33,6 +35,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 @Slf4j
 @Component
@@ -45,6 +48,10 @@ public class TelegramBot extends TelegramLongPollingBot {
     private AdRepository adRepository;
 
     final BotConfig config;
+
+    static final String ERROR = "Ошибка ";
+
+    static final String UNKNOWN_COMMAND = "Мне незнакома эта команда";
 
     static final String HELP_TEXT = "Этот бот пока ничего не умеет, кроме приветствий.\n" +
                                     "Вы можете увидеть список будущих команд в меню слева.";
@@ -62,13 +69,15 @@ public class TelegramBot extends TelegramLongPollingBot {
         privateChatCommands.add(new BotCommand("/settings", "установить настройки"));
 
         List<BotCommand> publicChatCommands = new ArrayList<>();
-        publicChatCommands.add(new BotCommand("/ban@sokrytbot", "забанить пользователя"));
-        publicChatCommands.add(new BotCommand("/mute@sokrytbot", "обеззвучить пользователя"));
-        publicChatCommands.add(new BotCommand("/warn@sokrytbot", "предупредить пользователя"));
+        publicChatCommands.add(new BotCommand("/ban", "забанить пользователя"));
+        publicChatCommands.add(new BotCommand("/mute", "обеззвучить пользователя"));
+        publicChatCommands.add(new BotCommand("/warn", "предупредить пользователя"));
+        publicChatCommands.add(new BotCommand("/check", "посмотреть количество предупреждений"));
+        publicChatCommands.add(new BotCommand("/reset", "сбросить предупреждения"));
 
         try {
-            this.execute(new SetMyCommands(privateChatCommands, new BotCommandScopeDefault(), null));
-            this.execute(new SetMyCommands(publicChatCommands, new BotCommandScopeAllGroupChats(), null));
+            this.execute(new SetMyCommands(privateChatCommands, new BotCommandScopeAllPrivateChats(), null));
+            this.execute(new SetMyCommands(publicChatCommands, new BotCommandScopeAllChatAdministrators(), null));
         } catch (TelegramApiException e) {
             log.error("Ошибка при написании списка команд: " + e.getMessage());
         }
@@ -76,68 +85,96 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-        String botUsername;
+        String botUsername = getBotUsername();
 
-        try {
-            botUsername = getMe().getUserName();
-        } catch (TelegramApiException e) {
-            throw new RuntimeException(e);
-        }
-
-        boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
+//        boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
 
         boolean isReplyToBot = update.getMessage().isReply() &&
                 update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
 
-        if (update.hasMessage() && update.getMessage().hasText() && (isReplyToBot || update.getMessage().getText().contains("@" + botUsername))) {
+        if (update.hasMessage() && update.getMessage().hasText()) {
             String messageText = update.getMessage().getText();
+
+            boolean isGroupChat = update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat();
+            boolean isPrivateChat = update.getMessage().getChat().isUserChat();
+
             long chatId = update.getMessage().getChatId();
 
-            if (messageText.contains("/send@sokrytbot") && config.getOwnerId() == chatId) {
-                String textToSend = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
-                Iterable<User> users = userRepository.findAll();
-                for (User user : users) {
-                    prepareAndSendMessage(user.getChatId(), textToSend);
-                }
-            } else {
+            if (isPrivateChat) {
+                handlePrivateCommand(chatId, messageText, update);
+            }
 
+            if (isGroupChat && (isReplyToBot || update.getMessage().getText().contains("@" + botUsername))) {
+                handleGroupChatCommand(chatId, messageText, update);
+            }
+        }
+//         else if (update.hasCallbackQuery()) {
+//            String callbackData = update.getCallbackQuery().getData();
+//            long messageId = update.getCallbackQuery().getMessage().getMessageId();
+//            long chatId = update.getCallbackQuery().getMessage().getChatId();
+//
+//            if (callbackData.equals(YES_BUTTON)) {
+//                String text = "Вы нажали кнопку ДА";
+//                executeEditMessageText(text, chatId, messageId);
+//
+//            } else if (callbackData.equals(NO_BUTTON)) {
+//                String text = "Вы нажали кнопку НЕТ";
+//                executeEditMessageText(text, chatId, messageId);
+//            }
+//        }
+    }
+
+    private void handlePrivateCommand(long chatId, String messageText, Update update) {
+        if (messageText.contains("/send") && config.getOwnerId() == chatId) {
+            String textToSend = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
+            Iterable<User> users = userRepository.findAll();
+            for (User user : users) {
+                prepareAndSendMessage(user.getChatId(), textToSend);
+            }
+        } else {
             switch (messageText) {
-                case "/start@sokrytbot":
+                case "/start":
                     registerUser(update.getMessage());
                     startCommandReceived(chatId, update.getMessage().getChat().getFirstName());
                     break;
-                case "/help@sokrytbot":
+                case "/help":
                     prepareAndSendMessage(chatId, HELP_TEXT);
                     break;
-                case "/register@sokrytbot":
+                case "/register":
                     register(chatId);
                     break;
-                case "/ban@sokrytbot":
-                    banUser(update.getMessage().getChatId(), update.getMessage().getReplyToMessage().getFrom().getId(), update.getMessage().getReplyToMessage().getFrom().getFirstName());
-                    log.info("Забанили " + update.getMessage().getFrom().getUserName());
-                    break;
-                case "/warn@sokrytbot":
-
-                    break;
                 default:
-                    prepareAndSendMessage(chatId, "Мне незнакома эта команда");
-            }
-            }
-        } else if (update.hasCallbackQuery()) {
-            String callbackData = update.getCallbackQuery().getData();
-            long messageId = update.getCallbackQuery().getMessage().getMessageId();
-            long chatId = update.getCallbackQuery().getMessage().getChatId();
-
-            if (callbackData.equals(YES_BUTTON)) {
-                String text = "Вы нажали кнопку ДА";
-                executeEditMessageText(text, chatId, messageId);
-
-            } else if (callbackData.equals(NO_BUTTON)) {
-                String text = "Вы нажали кнопку НЕТ";
-                executeEditMessageText(text, chatId, messageId);
+                    prepareAndSendMessage(chatId, UNKNOWN_COMMAND);
             }
         }
     }
+
+    private void handleGroupChatCommand(long chatId, String messageText, Update update) {
+        Long commandSenderId = update.getMessage().getFrom().getId();
+        Long objectId = update.getMessage().getReplyToMessage().getFrom().getId();
+        String objectName = update.getMessage().getReplyToMessage().getFrom().getFirstName();
+
+            switch (messageText) {
+                case "/ban@sokrytbot":
+                    banUser(chatId, commandSenderId, objectId, objectName);
+                    log.info("Забанили " + update.getMessage().getFrom().getUserName());
+                    break;
+                case "/warn@sokrytbot":
+                    warnUser(chatId, commandSenderId, objectId, objectName, update.getMessage());
+                    break;
+                case "/mute@sokrytbot":
+
+                    break;
+                case "/check@sokrytbot":
+
+                    break;
+                case "/reset@sokrytbot":
+
+                default:
+                    prepareAndSendMessage(chatId, "Мне незнакома эта команда");
+            }
+        }
+
 
     private void register(Long chatId) {
         SendMessage message = new SendMessage();
@@ -171,54 +208,110 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
 
     private void registerUser(Message message) {
-        if (userRepository.findById(message.getChatId()).isEmpty()) {
-            Long chatId = message.getChatId();
-            Chat chat = message.getChat();
+        if (message != null && message.getChat() != null) {
+            if (userRepository.findById(message.getFrom().getId()).isEmpty()) {
+                Long chatId = message.getFrom().getId();
+                Chat chat = message.getChat();
 
-            User user = new User();
-            user.setChatId(chatId);
-            user.setFirstName(chat.getFirstName());
-            user.setLastName(chat.getLastName());
-            user.setUserName(chat.getUserName());
-            user.setRegisteredAt(new Timestamp(System.currentTimeMillis()));
+                User user = new User();
+                user.setChatId(chatId);
+                user.setFirstName(chat.getFirstName());
+                user.setLastName(chat.getLastName());
+                user.setUserName(chat.getUserName());
+                user.setRegisteredAt(new Timestamp(System.currentTimeMillis()));
 
-            userRepository.save(user);
-            log.info("пользователь сохранен: " + user);
+                userRepository.save(user);
+                log.info("Пользователь сохранен: " + user);
+            }
+        } else {
+            log.warn("Попытка зарегистрировать пользователя с пустым сообщением или чатом");
         }
     }
 
-    private void startCommandReceived(long chatId, String name) {
+    private void startCommandReceived(Long chatId, String name) {
         String answer = EmojiParser.parseToUnicode("Доброго здоровья, " + name + "!" + " :smiley:");
         prepareAndSendMessage(chatId, answer);
         log.info("Ответил пользователю " + name);
     }
 
-    private void banUser(long chatId, long bannedUserId, String bannedUserNickname) {
+    private void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname) {
         try {
-            GetChatAdministrators getChatAdministrators = new GetChatAdministrators();
-            getChatAdministrators.setChatId(chatId);
-            List<ChatMember> administrators = execute(getChatAdministrators);
+            boolean isAdmin = isAdministator(chatId, commandSenderId);
+            boolean isBannedAdmin = isAdministator(chatId, bannedUserId);
 
-            boolean isAdmin = administrators.stream()
-                    .anyMatch(admin -> admin.getUser().getId().equals(bannedUserId));
             if (isAdmin) {
-                prepareAndSendMessage(chatId, "Не могу забанить администратора");
+                if (isBannedAdmin) {
+                    prepareAndSendMessage(chatId, "Не могу забанить администратора");
+                } else {
+                    execute(new BanChatMember(String.valueOf(chatId), bannedUserId));
+                    String text = bannedUserNickname + " уничтожен.";
+                    prepareAndSendMessage(chatId, text);
+                }
             } else {
-                execute(new BanChatMember(String.valueOf(chatId), bannedUserId));
-                String text = bannedUserNickname + " уничтожен.";
-                prepareAndSendMessage(chatId, text);
+                prepareAndSendMessage(chatId, ERROR);
             }
         } catch (TelegramApiException e) {
-            log.error("Ошибка: " + e.getMessage());
+            log.error(ERROR + e.getMessage());
         }
     }
 
-    private void warnUser() {
+    private void warnUser(Long chatId, Long commandSenderId, Long warnedUserId, String warnedUserNickname, Message message) {
+        boolean isAdmin = isAdministator(chatId, message.getFrom().getId());
 
+        if (isAdmin) {
+            registerUser(message.getReplyToMessage());
+
+            Optional<User> warnedUserOptional = userRepository.findById(warnedUserId);
+
+            if (warnedUserOptional.isPresent()) {
+                User warnedUser = warnedUserOptional.get();
+                Byte warnsCount = warnedUser.getNumberOfWarns();
+
+                if (warnsCount == null) {
+                    warnedUser.setNumberOfWarns((byte) 1);
+
+                    userRepository.save(warnedUser);
+
+                    prepareAndSendMessage(chatId, warnedUserNickname + " предупрежден. \n " +
+                            "Количество предупреждений: " + warnedUser.getNumberOfWarns());
+
+                } else if (warnsCount == 2) {
+                    warnedUser.setNumberOfWarns((byte) 0);
+
+                    userRepository.save(warnedUser);
+
+                    banUser(chatId, commandSenderId, warnedUserId, warnedUserNickname);
+                } else {
+                    warnedUser.setNumberOfWarns((byte) (warnedUser.getNumberOfWarns() + 1));
+
+                    userRepository.save(warnedUser);
+
+                    prepareAndSendMessage(chatId, warnedUserNickname + " предупрежден. \n" +
+                            "Количество предупреждений: " + warnedUser.getNumberOfWarns());
+                }
+            } else {
+                prepareAndSendMessage(chatId, ERROR);
+            }
+        } else {
+            prepareAndSendMessage(chatId, ERROR);
+        }
     }
 
     private void muteUser() {
 
+    }
+
+    private boolean isAdministator(Long chatId, Long userId) {
+        try {
+        GetChatAdministrators getChatAdministrators = new GetChatAdministrators();
+        getChatAdministrators.setChatId(chatId);
+        List<ChatMember> administrators = execute(getChatAdministrators);
+        return administrators.stream()
+                .anyMatch(admin -> admin.getUser().getId().equals(userId));
+        } catch (TelegramApiException e) {
+            log.error(ERROR + e.getMessage());
+            return false;
+        }
     }
 
 //    private void keyboardMethod(long chatId, String textToSend) {
@@ -255,18 +348,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            log.error("Ошибка: " + e.getMessage());
-        }
-    }
-
-    private void executeEditMessageText(String text, long chatId) {
-        EditMessageText message = new EditMessageText();
-        message.setChatId(chatId);
-        message.setText(text);
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Ошибка: " + e.getMessage());
+            log.error(ERROR + e.getMessage());
         }
     }
 
@@ -274,7 +356,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         try {
             execute(message);
         } catch (TelegramApiException e) {
-            log.error("Ошибка: " + e.getMessage());
+            log.error(ERROR + e.getMessage());
         }
     }
 
