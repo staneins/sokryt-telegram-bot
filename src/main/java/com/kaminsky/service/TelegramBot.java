@@ -153,23 +153,25 @@ public class TelegramBot extends TelegramLongPollingBot {
         Long commandSenderId = update.getMessage().getFrom().getId();
         Long objectId = update.getMessage().getReplyToMessage().getFrom().getId();
         String objectName = update.getMessage().getReplyToMessage().getFrom().getFirstName();
+        Message message = update.getMessage();
 
             switch (messageText) {
                 case "/ban@sokrytbot":
-                    banUser(chatId, commandSenderId, objectId, objectName);
+                    banUser(chatId, commandSenderId, objectId, objectName, message);
                     log.info("Забанили " + update.getMessage().getFrom().getUserName());
                     break;
                 case "/warn@sokrytbot":
-                    warnUser(chatId, commandSenderId, objectId, objectName, update.getMessage());
+                    warnUser(chatId, commandSenderId, objectId, objectName, message);
                     break;
                 case "/mute@sokrytbot":
 
                     break;
                 case "/check@sokrytbot":
-
+                    checkWarns(chatId, objectId, objectName, message);
                     break;
                 case "/reset@sokrytbot":
-
+                    resetWarns(chatId, objectId, objectName, message);
+                    break;
                 default:
                     prepareAndSendMessage(chatId, "Мне незнакома эта команда");
             }
@@ -234,18 +236,16 @@ public class TelegramBot extends TelegramLongPollingBot {
         log.info("Ответил пользователю " + name);
     }
 
-    private void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname) {
-        try {
-            boolean isAdmin = isAdministator(chatId, commandSenderId);
-            boolean isBannedAdmin = isAdministator(chatId, bannedUserId);
+    private void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname, Message message) {
 
-            if (isAdmin) {
-                if (isBannedAdmin) {
+        try {
+            if (isAdmin(chatId, commandSenderId)) {
+                if (isAdmin(chatId, bannedUserId)) {
                     prepareAndSendMessage(chatId, "Не могу забанить администратора");
                 } else {
                     execute(new BanChatMember(String.valueOf(chatId), bannedUserId));
                     String text = bannedUserNickname + " уничтожен.";
-                    prepareAndSendMessage(chatId, text);
+                    prepareAndSendMessage(chatId, text, message.getReplyToMessage().getMessageId());
                 }
             } else {
                 prepareAndSendMessage(chatId, ERROR);
@@ -256,38 +256,31 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
 
     private void warnUser(Long chatId, Long commandSenderId, Long warnedUserId, String warnedUserNickname, Message message) {
-        boolean isAdmin = isAdministator(chatId, message.getFrom().getId());
-
-        if (isAdmin) {
-            registerUser(message.getReplyToMessage());
-
-            Optional<User> warnedUserOptional = userRepository.findById(warnedUserId);
-
-            if (warnedUserOptional.isPresent()) {
-                User warnedUser = warnedUserOptional.get();
+        if (isAdmin(chatId, message.getFrom().getId())) {
+            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
+            if (warnedUser != null) {
                 Byte warnsCount = warnedUser.getNumberOfWarns();
-
                 if (warnsCount == null) {
                     warnedUser.setNumberOfWarns((byte) 1);
 
                     userRepository.save(warnedUser);
 
-                    prepareAndSendMessage(chatId, warnedUserNickname + " предупрежден. \n " +
-                            "Количество предупреждений: " + warnedUser.getNumberOfWarns());
+                    prepareAndSendMessage(chatId, warnedUserNickname + " предупрежден. \n" +
+                            "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
 
                 } else if (warnsCount == 2) {
                     warnedUser.setNumberOfWarns((byte) 0);
 
                     userRepository.save(warnedUser);
 
-                    banUser(chatId, commandSenderId, warnedUserId, warnedUserNickname);
+                    banUser(chatId, commandSenderId, warnedUserId, warnedUserNickname, message);
                 } else {
                     warnedUser.setNumberOfWarns((byte) (warnedUser.getNumberOfWarns() + 1));
 
                     userRepository.save(warnedUser);
 
                     prepareAndSendMessage(chatId, warnedUserNickname + " предупрежден. \n" +
-                            "Количество предупреждений: " + warnedUser.getNumberOfWarns());
+                            "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
                 }
             } else {
                 prepareAndSendMessage(chatId, ERROR);
@@ -297,8 +290,43 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    private void checkWarns(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
+        if (isAdmin(chatId, message.getFrom().getId())) {
+            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
+            if (warnedUser != null) {
+                Byte warnsCount = warnedUser.getNumberOfWarns();
+
+                if (warnsCount == null) {
+                    warnedUser.setNumberOfWarns((byte) 0);
+
+                    userRepository.save(warnedUser);
+                }
+                prepareAndSendMessage(chatId, "Пользователь " + warnedUserNickname + "\n" +
+                        "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
+                }
+            }
+    }
+
+    private void resetWarns(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
+        if (isAdmin(chatId, message.getFrom().getId())) {
+            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
+            if (warnedUser != null) {
+                    warnedUser.setNumberOfWarns((byte) 0);
+                    userRepository.save(warnedUser);
+
+                prepareAndSendMessage(chatId, "Предупреждения сброшены\n" + "Пользователь " + warnedUserNickname + "\n" +
+                        "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
+            }
+        }
+    }
+
     private void muteUser() {
 
+    }
+
+    private User getOrRegisterWarnedUser(Message message, Long warnedUserId) {
+        registerUser(message.getReplyToMessage());
+        return userRepository.findById(warnedUserId).orElse(null);
     }
 
     private boolean isAdministator(Long chatId, Long userId) {
@@ -313,6 +341,11 @@ public class TelegramBot extends TelegramLongPollingBot {
             return false;
         }
     }
+
+    private boolean isAdmin(Long chatId, Long userId) {
+        return isAdministator(chatId, userId);
+    }
+
 
 //    private void keyboardMethod(long chatId, String textToSend) {
 //
@@ -360,10 +393,18 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    private void prepareAndSendMessage(long chatId, String textToSend){
+    private void prepareAndSendMessage(Long chatId, String textToSend){
         SendMessage message = new SendMessage();
         message.setChatId(chatId);
         message.setText(textToSend);
+        executeMessage(message);
+    }
+
+    private void prepareAndSendMessage(Long chatId, String textToSend, Integer replyToMessageId){
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(textToSend);
+        message.setReplyToMessageId(replyToMessageId);
         executeMessage(message);
     }
 
