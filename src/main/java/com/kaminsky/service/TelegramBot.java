@@ -14,12 +14,10 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
-import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
-import org.telegram.telegrambots.meta.api.objects.Chat;
-import org.telegram.telegrambots.meta.api.objects.Message;
-import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.*;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllChatAdministrators;
@@ -55,6 +53,8 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     static final String HELP_TEXT = "Этот бот пока ничего не умеет, кроме приветствий.\n" +
                                     "Вы можете увидеть список будущих команд в меню слева.";
+
+    static final String NOT_ADMIN_ERROR = "Для этого нужны права адмистратора.";
 
     static final String YES_BUTTON = "YES_BUTTON";
     static final String NO_BUTTON = "NO_BUTTON";
@@ -164,7 +164,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                     warnUser(chatId, commandSenderId, objectId, objectName, message);
                     break;
                 case "/mute@sokrytbot":
-
+                    muteUser(chatId, objectId, objectName, message);
                     break;
                 case "/check@sokrytbot":
                     checkWarns(chatId, objectId, objectName, message);
@@ -237,7 +237,6 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
 
     private void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname, Message message) {
-
         try {
             if (isAdmin(chatId, commandSenderId)) {
                 if (isAdmin(chatId, bannedUserId)) {
@@ -248,7 +247,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                     prepareAndSendMessage(chatId, text, message.getReplyToMessage().getMessageId());
                 }
             } else {
-                prepareAndSendMessage(chatId, ERROR);
+                prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
             }
         } catch (TelegramApiException e) {
             log.error(ERROR + e.getMessage());
@@ -286,7 +285,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                 prepareAndSendMessage(chatId, ERROR);
             }
         } else {
-            prepareAndSendMessage(chatId, ERROR);
+            prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
         }
     }
 
@@ -304,7 +303,9 @@ public class TelegramBot extends TelegramLongPollingBot {
                 prepareAndSendMessage(chatId, "Пользователь " + warnedUserNickname + "\n" +
                         "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
                 }
-            }
+            } else {
+            prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
+        }
     }
 
     private void resetWarns(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
@@ -317,11 +318,27 @@ public class TelegramBot extends TelegramLongPollingBot {
                 prepareAndSendMessage(chatId, "Предупреждения сброшены\n" + "Пользователь " + warnedUserNickname + "\n" +
                         "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
             }
+        } else {
+            prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
         }
     }
 
-    private void muteUser() {
-
+    private void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
+        if (isAdmin(chatId, message.getFrom().getId())) {
+            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
+            Integer untilDate = 86400;
+            if (warnedUser != null) {
+                try {
+                    execute(new RestrictChatMember(String.valueOf(chatId) ,warnedUserId, new ChatPermissions(), untilDate, false));
+                    String text = warnedUserNickname + " обеззвучен.";
+                    prepareAndSendMessage(chatId, text, message.getReplyToMessage().getMessageId());
+                } catch (TelegramApiException e) {
+                    log.error(ERROR + e.getMessage());
+                }
+            }
+        } else {
+            prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
+        }
     }
 
     private User getOrRegisterWarnedUser(Message message, Long warnedUserId) {
