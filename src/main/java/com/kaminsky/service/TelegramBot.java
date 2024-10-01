@@ -16,6 +16,7 @@ import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMem
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.*;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
@@ -31,9 +32,8 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.Keyboard
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.sql.Timestamp;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
+import java.time.Duration;
+import java.util.*;
 
 @Slf4j
 @Component
@@ -47,17 +47,20 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     final BotConfig config;
 
+    private Map<Long, Boolean> userCaptchaStatus = new HashMap<>();
+
+    private Map<Long, List<Message>> userMessages = new HashMap<>();
+
     static final String ERROR = "Ошибка ";
 
-    static final String UNKNOWN_COMMAND = "Мне незнакома эта команда";
+    static final String UNKNOWN_COMMAND = "Мне незнакома эта команда.";
 
     static final String HELP_TEXT = "Этот бот пока ничего не умеет, кроме приветствий.\n" +
                                     "Вы можете увидеть список будущих команд в меню слева.";
 
     static final String NOT_ADMIN_ERROR = "Для этого нужны права адмистратора.";
 
-    static final String YES_BUTTON = "YES_BUTTON";
-    static final String NO_BUTTON = "NO_BUTTON";
+    static final String CONFIRM_BUTTON = "CONFIRM_BUTTON";
 
     public TelegramBot(BotConfig config) {
         this.config = config;
@@ -92,8 +95,37 @@ public class TelegramBot extends TelegramLongPollingBot {
         boolean isReplyToBot = update.getMessage().isReply() &&
                 update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
 
+        if (update.hasCallbackQuery()) {
+            CallbackQuery callbackQuery = update.getCallbackQuery();
+            String callbackData = callbackQuery.getData();
+            long userId = callbackQuery.getFrom().getId();
+            long chatId = callbackQuery.getMessage().getChatId();
+            long messageId = callbackQuery.getMessage().getMessageId();
+
+            if (callbackData.equals(CONFIRM_BUTTON)) {
+                userCaptchaStatus.put(userId, true);
+
+                try {
+                    String text = "Добро пожаловать";
+                    EditMessageText editMessage = new EditMessageText();
+                    editMessage.setChatId(String.valueOf(chatId));
+                    editMessage.setMessageId((int) messageId);
+                    editMessage.setText(text);
+                    execute(editMessage);
+
+                } catch (TelegramApiException e) {
+                    log.error(ERROR + e.getMessage());
+                }
+            }
+        }
+
         if (update.hasMessage() && update.getMessage().hasText()) {
             String messageText = update.getMessage().getText();
+            Message message = update.getMessage();
+            Long userId = message.getFrom().getId();
+
+            userMessages.putIfAbsent(userId, new ArrayList<>());
+            userMessages.get(userId).add(message);
 
             boolean isGroupChat = update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat();
             boolean isPrivateChat = update.getMessage().getChat().isUserChat();
@@ -108,20 +140,11 @@ public class TelegramBot extends TelegramLongPollingBot {
                 handleGroupChatCommand(chatId, messageText, update);
             }
         }
-//         else if (update.hasCallbackQuery()) {
-//            String callbackData = update.getCallbackQuery().getData();
-//            long messageId = update.getCallbackQuery().getMessage().getMessageId();
-//            long chatId = update.getCallbackQuery().getMessage().getChatId();
-//
-//            if (callbackData.equals(YES_BUTTON)) {
-//                String text = "Вы нажали кнопку ДА";
-//                executeEditMessageText(text, chatId, messageId);
-//
-//            } else if (callbackData.equals(NO_BUTTON)) {
-//                String text = "Вы нажали кнопку НЕТ";
-//                executeEditMessageText(text, chatId, messageId);
-//            }
-//        }
+
+        if (update.hasMessage() && update.getMessage().getNewChatMembers() != null && !update.getMessage().getNewChatMembers().isEmpty()) {
+            long chatId = update.getMessage().getChatId();
+            popupCaptcha(update, chatId);
+        }
     }
 
     private void handlePrivateCommand(long chatId, String messageText, Update update) {
@@ -139,9 +162,6 @@ public class TelegramBot extends TelegramLongPollingBot {
                     break;
                 case "/help":
                     prepareAndSendMessage(chatId, HELP_TEXT);
-                    break;
-                case "/register":
-                    register(chatId);
                     break;
                 default:
                     prepareAndSendMessage(chatId, UNKNOWN_COMMAND);
@@ -178,36 +198,36 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
 
 
-    private void register(Long chatId) {
-        SendMessage message = new SendMessage();
-        message.setChatId(chatId.toString());
-        message.setText("Вы действительно хотите зарегистрироваться?");
-
-        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
-        InlineKeyboardButton yesButton = new InlineKeyboardButton();
-
-        yesButton.setText("Да");
-        yesButton.setCallbackData(YES_BUTTON);
-
-        InlineKeyboardButton noButton = new InlineKeyboardButton();
-
-        noButton.setText("Нет");
-        noButton.setCallbackData(NO_BUTTON);
-
-        rowInLine.add(yesButton);
-        rowInLine.add(noButton);
-
-        rows.add(rowInLine);
-
-        markup.setKeyboard(rows);
-
-        message.setReplyMarkup(markup);
-
-        executeMessage(message);
-
-    }
+//    private void register(Long chatId) {
+//        SendMessage message = new SendMessage();
+//        message.setChatId(chatId.toString());
+//        message.setText("Вы действительно хотите зарегистрироваться?");
+//
+//        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+//        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+//        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+//        InlineKeyboardButton yesButton = new InlineKeyboardButton();
+//
+//        yesButton.setText("Да");
+//        yesButton.setCallbackData(YES_BUTTON);
+//
+//        InlineKeyboardButton noButton = new InlineKeyboardButton();
+//
+//        noButton.setText("Нет");
+//        noButton.setCallbackData(NO_BUTTON);
+//
+//        rowInLine.add(yesButton);
+//        rowInLine.add(noButton);
+//
+//        rows.add(rowInLine);
+//
+//        markup.setKeyboard(rows);
+//
+//        message.setReplyMarkup(markup);
+//
+//        executeMessage(message);
+//
+//    }
 
     private void registerUser(Message message) {
         if (message != null && message.getChat() != null) {
@@ -228,6 +248,10 @@ public class TelegramBot extends TelegramLongPollingBot {
         } else {
             log.warn("Попытка зарегистрировать пользователя с пустым сообщением или чатом");
         }
+    }
+
+    public List<Message> getUserMessages(Long userId) {
+        return userMessages.getOrDefault(userId, new ArrayList<>());
     }
 
     private void startCommandReceived(Long chatId, String name) {
@@ -340,6 +364,76 @@ public class TelegramBot extends TelegramLongPollingBot {
             prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
         }
     }
+
+    private void popupCaptcha(Update update, long chatId) {
+        Message msg = update.getMessage();
+        if (msg.getNewChatMembers() != null && !msg.getNewChatMembers().isEmpty()) {
+            List<org.telegram.telegrambots.meta.api.objects.User> newMembers = msg.getNewChatMembers();
+            for (org.telegram.telegrambots.meta.api.objects.User newMember : newMembers) {
+
+                userCaptchaStatus.put(newMember.getId(), false);
+
+                SendMessage message = new SendMessage();
+                message.setChatId(chatId);
+                message.setText("Нажмите кнопку, чтобы войти в чат");
+
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+                List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+                InlineKeyboardButton confirmButton = new InlineKeyboardButton();
+
+                String answer = EmojiParser.parseToUnicode(":point_right:" + "Я не бот" + ":point_left: ");
+                confirmButton.setText(answer);
+                confirmButton.setCallbackData(CONFIRM_BUTTON);
+
+                rowInLine.add(confirmButton);
+                rows.add(rowInLine);
+                markup.setKeyboard(rows);
+
+                message.setReplyMarkup(markup);
+
+                try {
+                    Message sentMessage = execute(message);
+                    long sentMessageId = sentMessage.getMessageId();
+
+                    scheduleKickTask(chatId, newMember.getId(), sentMessageId);
+
+                } catch (TelegramApiException e) {
+                    log.error(ERROR + e.getMessage());
+                }
+            }
+        }
+    }
+
+    private void scheduleKickTask(long chatId, long userId, long messageId) {
+        TimerTask task = new TimerTask() {
+            @Override
+            public void run() {
+                if (!userCaptchaStatus.getOrDefault(userId, false)) {
+                    try {
+                        BanChatMember kickChatMember = new BanChatMember();
+                        Duration kickDuration = Duration.ofNanos(1);
+                        kickChatMember.forTimePeriodDuration(kickDuration);
+                        kickChatMember.setChatId(String.valueOf(chatId));
+                        kickChatMember.setUserId(userId);
+                        execute(kickChatMember);
+
+                        DeleteMessage deleteMessage = new DeleteMessage();
+                        deleteMessage.setChatId(String.valueOf(chatId));
+                        deleteMessage.setMessageId((int) messageId);
+                        execute(deleteMessage);
+
+                    } catch (TelegramApiException e) {
+                        log.error(ERROR + e.getMessage());
+                    }
+                }
+            }
+        };
+
+        Timer timer = new Timer();
+        timer.schedule(task, 180000);
+    }
+
 
     private User getOrRegisterWarnedUser(Message message, Long warnedUserId) {
         registerUser(message.getReplyToMessage());
