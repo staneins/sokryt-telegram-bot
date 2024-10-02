@@ -88,6 +88,12 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
+
+        if (update.hasCallbackQuery()) {
+            handleCallbackQuery(update.getCallbackQuery());
+            return;
+        }
+
         String botUsername = getBotUsername();
 
 //        boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
@@ -95,37 +101,22 @@ public class TelegramBot extends TelegramLongPollingBot {
         boolean isReplyToBot = update.getMessage().isReply() &&
                 update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
 
-        if (update.hasCallbackQuery()) {
-            CallbackQuery callbackQuery = update.getCallbackQuery();
-            String callbackData = callbackQuery.getData();
-            long userId = callbackQuery.getFrom().getId();
-            long chatId = callbackQuery.getMessage().getChatId();
-            long messageId = callbackQuery.getMessage().getMessageId();
-
-            if (callbackData.equals(CONFIRM_BUTTON)) {
-                userCaptchaStatus.put(userId, true);
-
-                try {
-                    String text = "Добро пожаловать";
-                    EditMessageText editMessage = new EditMessageText();
-                    editMessage.setChatId(String.valueOf(chatId));
-                    editMessage.setMessageId((int) messageId);
-                    editMessage.setText(text);
-                    execute(editMessage);
-
-                } catch (TelegramApiException e) {
-                    log.error(ERROR + e.getMessage());
-                }
-            }
+        if (update.hasMessage() && update.getMessage().getNewChatMembers() != null && !update.getMessage().getNewChatMembers().isEmpty()) {
+            long chatId = update.getMessage().getChatId();
+            popupCaptcha(update, chatId);
         }
 
-        if (update.hasMessage() && update.getMessage().hasText()) {
-            String messageText = update.getMessage().getText();
+        if (update.hasMessage()) {
+            String messageText = "";
             Message message = update.getMessage();
             Long userId = message.getFrom().getId();
 
             userMessages.putIfAbsent(userId, new ArrayList<>());
             userMessages.get(userId).add(message);
+
+            if (message.hasText()) {
+                messageText = message.getText();
+            }
 
             boolean isGroupChat = update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat();
             boolean isPrivateChat = update.getMessage().getChat().isUserChat();
@@ -139,11 +130,6 @@ public class TelegramBot extends TelegramLongPollingBot {
             if (isGroupChat && (isReplyToBot || update.getMessage().getText().contains("@" + botUsername))) {
                 handleGroupChatCommand(chatId, messageText, update);
             }
-        }
-
-        if (update.hasMessage() && update.getMessage().getNewChatMembers() != null && !update.getMessage().getNewChatMembers().isEmpty()) {
-            long chatId = update.getMessage().getChatId();
-            popupCaptcha(update, chatId);
         }
     }
 
@@ -196,6 +182,35 @@ public class TelegramBot extends TelegramLongPollingBot {
                     prepareAndSendMessage(chatId, "Мне незнакома эта команда");
             }
         }
+
+    private void handleCallbackQuery(CallbackQuery callbackQuery) {
+        log.info("Получен callbackQuery с данными: " + callbackQuery.getData());
+        String callbackData = callbackQuery.getData();
+        long userId = callbackQuery.getFrom().getId();
+        long chatId = callbackQuery.getMessage().getChatId();
+        long messageId = callbackQuery.getMessage().getMessageId();
+        String userFirstName = callbackQuery.getFrom().getFirstName();
+        String userLink = "<a href=\"tg://user?id=" + userId + "\">" + userFirstName + "</a>";
+
+        String[] callbackDataParts = callbackData.split(":");
+        String button = callbackDataParts[0];
+        long targetUserId = Long.parseLong(callbackDataParts[1]);
+
+        if (button.equals(CONFIRM_BUTTON) && targetUserId == userId) {
+            userCaptchaStatus.put(userId, true);
+            try {
+                EditMessageText editMessage = new EditMessageText();
+                editMessage.setChatId(String.valueOf(chatId));
+                editMessage.setMessageId((int) messageId);
+                editMessage.setText("Добро пожаловать, " + userLink);
+                editMessage.setParseMode("HTML");
+                execute(editMessage);
+            } catch (TelegramApiException e) {
+                log.error(ERROR + e.getMessage());
+            }
+        }
+    }
+
 
 
 //    private void register(Long chatId) {
@@ -347,6 +362,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    //TODO починить мьют
     private void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
         if (isAdmin(chatId, message.getFrom().getId())) {
             User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
@@ -371,20 +387,26 @@ public class TelegramBot extends TelegramLongPollingBot {
             List<org.telegram.telegrambots.meta.api.objects.User> newMembers = msg.getNewChatMembers();
             for (org.telegram.telegrambots.meta.api.objects.User newMember : newMembers) {
 
-                userCaptchaStatus.put(newMember.getId(), false);
+                Long userId = newMember.getId();
+                String userFirstName = newMember.getFirstName();
+
+                userCaptchaStatus.put(userId, false);
 
                 SendMessage message = new SendMessage();
+                String userLink = "<a href=\"tg://user?id=" + userId + "\">" + userFirstName + "</a>" +
+                        ", нажмите кнопку в течение 3-х минут, чтобы войти в чат";
+                message.setParseMode("HTML");
                 message.setChatId(chatId);
-                message.setText("Нажмите кнопку, чтобы войти в чат");
+                message.setText(userLink);
 
                 InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
                 List<List<InlineKeyboardButton>> rows = new ArrayList<>();
                 List<InlineKeyboardButton> rowInLine = new ArrayList<>();
                 InlineKeyboardButton confirmButton = new InlineKeyboardButton();
 
-                String answer = EmojiParser.parseToUnicode(":point_right:" + "Я не бот" + ":point_left: ");
+                String answer = EmojiParser.parseToUnicode(":point_right:" + "Я не бот" + ":point_left:");
                 confirmButton.setText(answer);
-                confirmButton.setCallbackData(CONFIRM_BUTTON);
+                confirmButton.setCallbackData(CONFIRM_BUTTON + ":" + userId);
 
                 rowInLine.add(confirmButton);
                 rows.add(rowInLine);
@@ -423,6 +445,15 @@ public class TelegramBot extends TelegramLongPollingBot {
                         deleteMessage.setMessageId((int) messageId);
                         execute(deleteMessage);
 
+                        List<Message> kickedUserMessages = getUserMessages(userId);
+
+                        for (Message kickedUserMessage : kickedUserMessages) {
+                            deleteMessage = new DeleteMessage();
+                            deleteMessage.setChatId(String.valueOf(chatId));
+                            deleteMessage.setMessageId(kickedUserMessage.getMessageId());
+                            execute(deleteMessage);
+                        }
+
                     } catch (TelegramApiException e) {
                         log.error(ERROR + e.getMessage());
                     }
@@ -431,7 +462,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         };
 
         Timer timer = new Timer();
-        timer.schedule(task, 180000);
+        timer.schedule(task, 30000);
     }
 
 
