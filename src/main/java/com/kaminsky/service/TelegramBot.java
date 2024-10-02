@@ -84,6 +84,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         publicChatCommands.add(new BotCommand("/warn", "предупредить пользователя"));
         publicChatCommands.add(new BotCommand("/check", "посмотреть количество предупреждений"));
         publicChatCommands.add(new BotCommand("/reset", "сбросить предупреждения"));
+        publicChatCommands.add(new BotCommand("/wipe", "очистить историю сообщений"));
 
         try {
             this.execute(new SetMyCommands(privateChatCommands, new BotCommandScopeAllPrivateChats(), null));
@@ -120,7 +121,6 @@ public class TelegramBot extends TelegramLongPollingBot {
 
             if (message.getLeftChatMember() != null && !bannedUsers.contains(message.getLeftChatMember().getId())) {
                 sayFarewellToUser(message);
-                log.info("message.getLeftChatMember().getId(): " + message.getLeftChatMember().getId());
             }
 
             userMessages.putIfAbsent(userId, new ArrayList<>());
@@ -190,8 +190,11 @@ public class TelegramBot extends TelegramLongPollingBot {
                 case "/reset@sokrytbot":
                     resetWarns(chatId, objectId, objectName, message);
                     break;
+                case "/wipe@sokrytbot":
+                    wipeAllMessages();
+                    break;
                 default:
-                    prepareAndSendMessage(chatId, "Мне незнакома эта команда");
+                    prepareAndSendMessage(chatId, "Мне незнакома эта команда", update.getMessage().getMessageId());
             }
         }
 
@@ -298,7 +301,6 @@ public class TelegramBot extends TelegramLongPollingBot {
                             " уничтожен";
                     prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
                     bannedUsers.add(bannedUserId);
-                    log.info("bannedUserId: " + bannedUserId);
                     cleanUpAndShutDown(1, TimeUnit.MINUTES);
                 }
             } else {
@@ -409,6 +411,30 @@ public class TelegramBot extends TelegramLongPollingBot {
             prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
         }
     }
+
+    private void wipeAllMessages() {
+        if (!userMessages.isEmpty()) {
+            for (Map.Entry<Long, List<Message>> entry : userMessages.entrySet()) {
+                List<Message> messages = entry.getValue();
+                for (Message message : messages) {
+                    DeleteMessage deleteMessage = new DeleteMessage();
+                    deleteMessage.setMessageId(message.getMessageId());
+                    deleteMessage.setChatId(String.valueOf(message.getChatId()));
+                    try {
+                        execute(deleteMessage);
+                        userMessages.clear();
+                    } catch (TelegramApiException e) {
+                        log.error(ERROR + e.getMessage());
+                    }
+                }
+            }
+        }
+    }
+
+    private void reactOnKeyWords() {
+
+    }
+
 
     private void popupCaptcha(Update update, long chatId) {
         Message msg = update.getMessage();
@@ -534,21 +560,17 @@ public class TelegramBot extends TelegramLongPollingBot {
         return userRepository.findById(warnedUserId).orElse(null);
     }
 
-    private boolean isAdministator(Long chatId, Long userId) {
+    private boolean isAdmin(Long chatId, Long userId) {
         try {
-        GetChatAdministrators getChatAdministrators = new GetChatAdministrators();
-        getChatAdministrators.setChatId(chatId);
-        List<ChatMember> administrators = execute(getChatAdministrators);
-        return administrators.stream()
-                .anyMatch(admin -> admin.getUser().getId().equals(userId));
+            GetChatAdministrators getChatAdministrators = new GetChatAdministrators();
+            getChatAdministrators.setChatId(chatId);
+            List<ChatMember> administrators = execute(getChatAdministrators);
+            return administrators.stream()
+                    .anyMatch(admin -> admin.getUser().getId().equals(userId));
         } catch (TelegramApiException e) {
             log.error(ERROR + e.getMessage());
             return false;
         }
-    }
-
-    private boolean isAdmin(Long chatId, Long userId) {
-        return isAdministator(chatId, userId);
     }
 
 
