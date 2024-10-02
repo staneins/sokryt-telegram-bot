@@ -9,13 +9,13 @@ import lombok.Setter;
 
 @Getter
 @Setter
-@Entity(name = "adsTable")
-public class Ad {
+@Entity(name = "keyWordsTable")
+public class KeyWord {
 
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
 
-    private String ad;
+    private String keyWord;
 
 }

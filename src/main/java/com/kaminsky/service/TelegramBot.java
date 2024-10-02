@@ -1,20 +1,20 @@
 package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
-import com.kaminsky.model.Ad;
-import com.kaminsky.model.AdRepository;
+import com.kaminsky.model.KeyWord;
+import com.kaminsky.model.KeyWordRepository;
 import com.kaminsky.model.User;
 import com.kaminsky.model.UserRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
+import org.telegram.telegrambots.meta.api.methods.send.SendAnimation;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
@@ -22,13 +22,9 @@ import org.telegram.telegrambots.meta.api.objects.*;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllChatAdministrators;
-import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllGroupChats;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllPrivateChats;
-import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeDefault;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.sql.Timestamp;
@@ -46,7 +42,7 @@ public class TelegramBot extends TelegramLongPollingBot {
     private UserRepository userRepository;
 
     @Autowired
-    private AdRepository adRepository;
+    private KeyWordRepository adRepository;
 
     final BotConfig config;
 
@@ -68,6 +64,12 @@ public class TelegramBot extends TelegramLongPollingBot {
     static final String NOT_ADMIN_ERROR = "Для этого нужны права адмистратора.";
 
     static final String CONFIRM_BUTTON = "CONFIRM_BUTTON";
+
+    static String welcomeMessage = "Милости прошу к нашему шалашу";
+
+    static String recurrentMessage = "Милости прошу к нашим тематическим шалашам";
+    @Autowired
+    private KeyWordRepository keyWordRepository;
 
     public TelegramBot(BotConfig config) {
         this.config = config;
@@ -128,7 +130,13 @@ public class TelegramBot extends TelegramLongPollingBot {
 
             if (message.hasText()) {
                 messageText = message.getText();
+                List<String> keyWords = getKeyWords();
+                if (isContainKeyWords(keyWords, messageText)) {
+                    sendRandomGif(message.getChatId());
+                    muteUser(message.getChatId(), message.getFrom().getId(), message.getFrom().getFirstName(), message, true);
+                }
             }
+
 
             boolean isGroupChat = update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat();
             boolean isPrivateChat = update.getMessage().getChat().isUserChat();
@@ -412,6 +420,27 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    private void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message, Boolean isAdmin) {
+        if (isAdmin(chatId, message.getFrom().getId())) {
+            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
+            if (warnedUser != null) {
+                try {
+                    Duration muteDuration = Duration.ofDays(1);
+                    RestrictChatMember restrictChatMember = new RestrictChatMember(String.valueOf(chatId), warnedUserId, new ChatPermissions());
+                    restrictChatMember.forTimePeriodDuration(muteDuration);
+                    execute(restrictChatMember);
+                    String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a>" +
+                            " обеззвучен на сутки";
+                    prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
+                } catch (TelegramApiException e) {
+                    log.error(ERROR + e.getMessage());
+                }
+            }
+        } else {
+            prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
+        }
+    }
+
     private void wipeAllMessages() {
         if (!userMessages.isEmpty()) {
             for (Map.Entry<Long, List<Message>> entry : userMessages.entrySet()) {
@@ -431,8 +460,66 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    private void reactOnKeyWords() {
+    private boolean isContainKeyWords(List<String> words, String messageText) {
+        String text = messageText.toLowerCase();
+        for (String word : words) {
+            if (text.contains(word)) {
+                return true;
+            }
+        }
+        return false;
+    }
 
+    private List<String> getKeyWords() {
+        Iterable<KeyWord> keyWords = keyWordRepository.findAll();
+        List<String> words = new ArrayList<>();
+        for (KeyWord keyWord : keyWords) {
+            words.add(keyWord.getKeyWord());
+        }
+        return words;
+    }
+
+    private void sendRandomGif(long chatId) {
+        String gifUrl = chooseRandomGifUrl();
+        SendAnimation sendAnimation = new SendAnimation();
+        sendAnimation.setChatId(chatId);
+        sendAnimation.setAnimation(new InputFile(gifUrl));
+
+        try {
+            execute(sendAnimation);
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при отправке GIF: " + e.getMessage());
+        }
+    }
+
+    private String chooseRandomGifUrl() {
+        String url1 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExdDg4NWoxZWJ6MGh0MXpkaGdrZHZqcGt3Y3JzZ2d3NnQzcDU0OWdsZyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/NEHJpOX8vWHk9dzEjy/giphy.gif";
+        String url2 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExcHo4MzV6c3U2Z2Vwd3U0Nm56NGhnNHVkc2Izb2F3OGo5NGlldXYyMSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/5WUsLZLkZlMdO/giphy.gif";
+        String url3 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExZnVvZnFsM3JwbnYwYjNpZGFpOGpjc2t3bW52c3NnMWZ0cm0wa2FxeCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/jquDWJfPUMCiI/giphy.gif";
+        String url4 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExMWExM3d6dDl4NXlnYmJoOWlieXU4NWE3dnYxejg3d2I0dnZtYmE1NyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Fkmgse8OMKn9C/giphy.gif";
+        String url5 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExeHV0Zno0dnMycjk4c2Z0NzBuOXhmZzkzcXE5YjY0aTVldHljb25jMyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/8nmLYpDYSTnOw/giphy.gif";
+        String url6 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExYm55Z3V1dDQ2a3hyaHJqdXJsYXVzMzExNTFscGRkNHRiNWFqbHNjZCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l3q2K5jinAlChoCLS/giphy.gif";
+        String url7 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExcmJiZXM2dnRyMnN3czdpaDVlMzl0c2Nma3ZnaHI3Z20wa2Nha2NsMSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/JSueytO5O29yM/giphy.gif";
+        String url8 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExZTRnNzFoM3Bvanhub3hweWo4anQ5b3RuNGYxM3ZybnlwZGZsc2gxYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/70orEIVDASzXW/giphy.gif";
+        String url9 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExN3h0MTZ4OHp0OTUwdTUwdGRyeGJoNXlzNzltdzgxdWdoc3E5NXJ0NCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/KeoW2fn76yv66qzpJw/giphy.gif";
+        String url10 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDMwaHZzcjFyZmlqMmhxYXJpMzk2NDY5Z2Qyd3FubjNkazk1d2p3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/A3V2IWHMlFD9x9NaPD/giphy.gif";
+        String url11 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExNXcxanUweXNmaXl3bXliYWVnejJtcmNxNmlnbGpjdGVwOWRobmMyeiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Zhy0nWRKx6cKkTzxUF/giphy.gif";
+        int randomizer = (int) (Math.random() * 11) + 1;
+
+        List<String> urls = new ArrayList<>();
+        urls.add(url1);
+        urls.add(url2);
+        urls.add(url3);
+        urls.add(url4);
+        urls.add(url5);
+        urls.add(url6);
+        urls.add(url7);
+        urls.add(url8);
+        urls.add(url9);
+        urls.add(url10);
+        urls.add(url11);
+
+        return urls.get(randomizer);
     }
 
 
@@ -644,17 +731,17 @@ public class TelegramBot extends TelegramLongPollingBot {
         executeMessage(message);
     }
 
-    @Scheduled(cron = "${cron.scheduler}")
-    private void sendAd(){
-        Iterable<Ad> ads = adRepository.findAll();
-        Iterable<User> users = userRepository.findAll();
-
-        for (Ad ad : ads) {
-            for (User user : users) {
-                prepareAndSendMessage(user.getChatId(), ad.getAd());
-            }
-        }
-    }
+//    @Scheduled(cron = "${cron.scheduler}")
+//    private void sendAd(){
+//        Iterable<KeyWord> ads = adRepository.findAll();
+//        Iterable<User> users = userRepository.findAll();
+//
+//        for (KeyWord ad : ads) {
+//            for (User user : users) {
+//                prepareAndSendMessage(user.getChatId(), ad.getAd());
+//            }
+//        }
+//    }
 
     @Override
     public String getBotUsername() {
