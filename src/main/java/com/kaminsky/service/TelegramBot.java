@@ -362,15 +362,16 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    //TODO починить мьют
     private void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
         if (isAdmin(chatId, message.getFrom().getId())) {
             User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
-            Integer untilDate = 86400;
             if (warnedUser != null) {
                 try {
-                    execute(new RestrictChatMember(String.valueOf(chatId) ,warnedUserId, new ChatPermissions(), untilDate, false));
-                    String text = warnedUserNickname + " обеззвучен.";
+                    Duration muteDuration = Duration.ofDays(1);
+                    RestrictChatMember restrictChatMember = new RestrictChatMember(String.valueOf(chatId), warnedUserId, new ChatPermissions());
+                    restrictChatMember.forTimePeriodDuration(muteDuration);
+                    execute(restrictChatMember);
+                    String text = warnedUserNickname + " обеззвучен на сутки.";
                     prepareAndSendMessage(chatId, text, message.getReplyToMessage().getMessageId());
                 } catch (TelegramApiException e) {
                     log.error(ERROR + e.getMessage());
