@@ -34,6 +34,9 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -50,6 +53,10 @@ public class TelegramBot extends TelegramLongPollingBot {
     private Map<Long, Boolean> userCaptchaStatus = new HashMap<>();
 
     private Map<Long, List<Message>> userMessages = new HashMap<>();
+
+    private Set<Long> bannedUsers = new HashSet<>();
+
+    private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     static final String ERROR = "Ошибка ";
 
@@ -110,6 +117,11 @@ public class TelegramBot extends TelegramLongPollingBot {
             String messageText = "";
             Message message = update.getMessage();
             Long userId = message.getFrom().getId();
+
+            if (message.getLeftChatMember() != null && !bannedUsers.contains(message.getLeftChatMember().getId())) {
+                sayFarewellToUser(message);
+                log.info("message.getLeftChatMember().getId(): " + message.getLeftChatMember().getId());
+            }
 
             userMessages.putIfAbsent(userId, new ArrayList<>());
             userMessages.get(userId).add(message);
@@ -282,8 +294,12 @@ public class TelegramBot extends TelegramLongPollingBot {
                     prepareAndSendMessage(chatId, "Не могу забанить администратора");
                 } else {
                     execute(new BanChatMember(String.valueOf(chatId), bannedUserId));
-                    String text = bannedUserNickname + " уничтожен.";
-                    prepareAndSendMessage(chatId, text, message.getReplyToMessage().getMessageId());
+                    String text = "<a href=\"tg://user?id=" + bannedUserId + "\">" + bannedUserNickname + "</a>" +
+                            " уничтожен";
+                    prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
+                    bannedUsers.add(bannedUserId);
+                    log.info("bannedUserId: " + bannedUserId);
+                    cleanUpAndShutDown(1, TimeUnit.MINUTES);
                 }
             } else {
                 prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
@@ -303,8 +319,10 @@ public class TelegramBot extends TelegramLongPollingBot {
 
                     userRepository.save(warnedUser);
 
-                    prepareAndSendMessage(chatId, warnedUserNickname + " предупрежден. \n" +
-                            "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
+                    String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a>" +
+                            " предупрежден. \n" + "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3";
+
+                    prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
 
                 } else if (warnsCount == 2) {
                     warnedUser.setNumberOfWarns((byte) 0);
@@ -317,8 +335,10 @@ public class TelegramBot extends TelegramLongPollingBot {
 
                     userRepository.save(warnedUser);
 
-                    prepareAndSendMessage(chatId, warnedUserNickname + " предупрежден. \n" +
-                            "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
+                    String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a>" +
+                            " предупрежден. \n" + "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3";
+
+                    prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
                 }
             } else {
                 prepareAndSendMessage(chatId, ERROR);
@@ -339,8 +359,10 @@ public class TelegramBot extends TelegramLongPollingBot {
 
                     userRepository.save(warnedUser);
                 }
-                prepareAndSendMessage(chatId, "Пользователь " + warnedUserNickname + "\n" +
-                        "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
+                String text = "Пользователь " + "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a>" +
+                        " Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3";
+
+                prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
                 }
             } else {
             prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
@@ -354,8 +376,13 @@ public class TelegramBot extends TelegramLongPollingBot {
                     warnedUser.setNumberOfWarns((byte) 0);
                     userRepository.save(warnedUser);
 
-                prepareAndSendMessage(chatId, "Предупреждения сброшены\n" + "Пользователь " + warnedUserNickname + "\n" +
-                        "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3", message.getReplyToMessage().getMessageId());
+                String text = "Предупреждения сброшены\n" + "Пользователь "
+                        + "<a href=\"tg://user?id=" + warnedUserId + "\">"
+                        + warnedUserNickname + "</a>" +
+                        "\nКоличество предупреждений: " +
+                        warnedUser.getNumberOfWarns() + " из 3";
+
+                prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
             }
         } else {
             prepareAndSendMessage(chatId, NOT_ADMIN_ERROR);
@@ -371,8 +398,9 @@ public class TelegramBot extends TelegramLongPollingBot {
                     RestrictChatMember restrictChatMember = new RestrictChatMember(String.valueOf(chatId), warnedUserId, new ChatPermissions());
                     restrictChatMember.forTimePeriodDuration(muteDuration);
                     execute(restrictChatMember);
-                    String text = warnedUserNickname + " обеззвучен на сутки.";
-                    prepareAndSendMessage(chatId, text, message.getReplyToMessage().getMessageId());
+                    String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a>" +
+                            " обеззвучен на сутки";
+                    prepareAndSendHTMLMessage(chatId, text, message.getMessageId());
                 } catch (TelegramApiException e) {
                     log.error(ERROR + e.getMessage());
                 }
@@ -420,7 +448,6 @@ public class TelegramBot extends TelegramLongPollingBot {
                     long sentMessageId = sentMessage.getMessageId();
 
                     scheduleKickTask(chatId, newMember.getId(), sentMessageId);
-
                 } catch (TelegramApiException e) {
                     log.error(ERROR + e.getMessage());
                 }
@@ -440,6 +467,8 @@ public class TelegramBot extends TelegramLongPollingBot {
                         kickChatMember.setChatId(String.valueOf(chatId));
                         kickChatMember.setUserId(userId);
                         execute(kickChatMember);
+                        bannedUsers.add(userId);
+                        cleanUpAndShutDown(1, TimeUnit.MINUTES);
 
                         DeleteMessage deleteMessage = new DeleteMessage();
                         deleteMessage.setChatId(String.valueOf(chatId));
@@ -461,11 +490,44 @@ public class TelegramBot extends TelegramLongPollingBot {
                 }
             }
         };
-
         Timer timer = new Timer();
         timer.schedule(task, 30000);
     }
 
+    private void sayFarewellToUser(Message message) {
+        org.telegram.telegrambots.meta.api.objects.User leftUser = message.getLeftChatMember();
+        long chatId = message.getChatId();
+
+        String userFirstName = leftUser.getFirstName();
+        String userLink = "<a href=\"tg://user?id=" + leftUser.getId() + "\">" + userFirstName + "</a>";
+        String farewellMessage = "Всего хорошего, " + userLink;
+
+        prepareAndSendHTMLMessage(chatId, farewellMessage, message.getMessageId());
+    }
+
+    private void clearBannedUsers() {
+        bannedUsers.clear();
+        log.info("Список забаненных пользователей очищен");
+    }
+
+    private void cleanUpAndShutDown(long interval, TimeUnit timeUnit) {
+        startBannedUsersCleanupTask(interval, timeUnit);
+        if (bannedUsers.isEmpty()) {
+            stopScheduler();
+        }
+    }
+
+    private void startBannedUsersCleanupTask(long interval, TimeUnit timeUnit) {
+        scheduler.scheduleAtFixedRate(() -> {
+            clearBannedUsers();
+        }, interval, interval, timeUnit);
+    }
+
+    public void stopScheduler() {
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdown();
+        }
+    }
 
     private User getOrRegisterWarnedUser(Message message, Long warnedUserId) {
         registerUser(message.getReplyToMessage());
@@ -548,6 +610,15 @@ public class TelegramBot extends TelegramLongPollingBot {
         message.setChatId(chatId);
         message.setText(textToSend);
         message.setReplyToMessageId(replyToMessageId);
+        executeMessage(message);
+    }
+
+    private void prepareAndSendHTMLMessage(Long chatId, String textToSend, Integer replyToMessageId){
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(textToSend);
+        message.setReplyToMessageId(replyToMessageId);
+        message.setParseMode("HTML");
         executeMessage(message);
     }
 
