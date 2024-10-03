@@ -8,6 +8,7 @@ import com.kaminsky.model.UserRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
@@ -52,22 +53,34 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private Set<Long> bannedUsers = new HashSet<>();
 
+    private Map<Long, List<Long>> chatAdministrators = new HashMap<>();
+
     private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
     static final String ERROR = "Ошибка ";
 
     static final String UNKNOWN_COMMAND = "Мне незнакома эта команда.";
 
-    static final String HELP_TEXT = "Этот бот пока ничего не умеет, кроме приветствий.\n" +
-                                    "Вы можете увидеть список будущих команд в меню слева.";
+    static final String HELP_TEXT = "Это бот проекта «Сокрытая Русь» и общества сщмч. Андрея (Ухтомского)\n" +
+                                    "Основной функционал бота направлен на администрирование чата и связь с модераторами\n" +
+                                    "Вы можете увидеть доступные команды в меню слева";
+
+    static final String CONFIG_TEXT = "Что вы хотите настроить?";
 
     static final String NOT_ADMIN_ERROR = "Для этого нужны права адмистратора.";
 
     static final String CONFIRM_BUTTON = "CONFIRM_BUTTON";
 
+    static final String WELCOME_TEXT_BUTTON = "WELCOME_TEXT_BUTTON";
+
+    static final String CONFIG_BUTTON = "CONFIG_BUTTON";
+
     static String welcomeMessage = "Милости прошу к нашему шалашу";
 
     static String recurrentMessage = "Милости прошу к нашим тематическим шалашам";
+
+    static Long recurrentChatId = 0L;
+
     @Autowired
     private KeyWordRepository keyWordRepository;
 
@@ -75,10 +88,8 @@ public class TelegramBot extends TelegramLongPollingBot {
         this.config = config;
         List<BotCommand> privateChatCommands = new ArrayList<>();
         privateChatCommands.add(new BotCommand("/start", "запустить бот"));
-        privateChatCommands.add(new BotCommand("/mydata", "данные о пользователе"));
-        privateChatCommands.add(new BotCommand("/deletedata", "удалить данные о пользователе"));
         privateChatCommands.add(new BotCommand("/help", "описание работы бота"));
-        privateChatCommands.add(new BotCommand("/settings", "установить настройки"));
+        privateChatCommands.add(new BotCommand("/config", "настройки"));
 
         List<BotCommand> publicChatCommands = new ArrayList<>();
         publicChatCommands.add(new BotCommand("/ban", "забанить пользователя"));
@@ -98,12 +109,10 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-
         if (update.hasCallbackQuery()) {
             handleCallbackQuery(update.getCallbackQuery());
             return;
         }
-
         String botUsername = getBotUsername();
 
 //        boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
@@ -112,11 +121,14 @@ public class TelegramBot extends TelegramLongPollingBot {
                 update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
 
         if (update.hasMessage() && update.getMessage().getNewChatMembers() != null && !update.getMessage().getNewChatMembers().isEmpty()) {
-            long chatId = update.getMessage().getChatId();
+            Long chatId = update.getMessage().getChatId();
             popupCaptcha(update, chatId);
         }
 
         if (update.hasMessage()) {
+            Long chatId = update.getMessage().getChatId();
+            recurrentChatId = chatId;
+            registerAdministrators(chatId);
             String messageText = "";
             Message message = update.getMessage();
             Long userId = message.getFrom().getId();
@@ -137,11 +149,8 @@ public class TelegramBot extends TelegramLongPollingBot {
                 }
             }
 
-
             boolean isGroupChat = update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat();
             boolean isPrivateChat = update.getMessage().getChat().isUserChat();
-
-            long chatId = update.getMessage().getChatId();
 
             if (isPrivateChat) {
                 handlePrivateCommand(chatId, messageText, update);
@@ -168,6 +177,9 @@ public class TelegramBot extends TelegramLongPollingBot {
                     break;
                 case "/help":
                     prepareAndSendMessage(chatId, HELP_TEXT);
+                    break;
+                case "/config":
+
                     break;
                 default:
                     prepareAndSendMessage(chatId, UNKNOWN_COMMAND);
@@ -213,7 +225,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         long chatId = callbackQuery.getMessage().getChatId();
         long messageId = callbackQuery.getMessage().getMessageId();
         String userFirstName = callbackQuery.getFrom().getFirstName();
-        String userLink = "<a href=\"tg://user?id=" + userId + "\">" + userFirstName + "</a>";
+        String userLink = "[" + userFirstName + "](tg://user?id=" + userId + ")";
 
         String[] callbackDataParts = callbackData.split(":");
         String button = callbackDataParts[0];
@@ -225,47 +237,14 @@ public class TelegramBot extends TelegramLongPollingBot {
                 EditMessageText editMessage = new EditMessageText();
                 editMessage.setChatId(String.valueOf(chatId));
                 editMessage.setMessageId((int) messageId);
-                editMessage.setText("Добро пожаловать, " + userLink);
-                editMessage.setParseMode("HTML");
+                editMessage.setText("Добро пожаловать, " + userLink + "\n" + welcomeMessage);
+                editMessage.setParseMode("MarkdownV2");
                 execute(editMessage);
             } catch (TelegramApiException e) {
                 log.error(ERROR + e.getMessage());
             }
         }
     }
-
-
-
-//    private void register(Long chatId) {
-//        SendMessage message = new SendMessage();
-//        message.setChatId(chatId.toString());
-//        message.setText("Вы действительно хотите зарегистрироваться?");
-//
-//        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-//        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-//        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
-//        InlineKeyboardButton yesButton = new InlineKeyboardButton();
-//
-//        yesButton.setText("Да");
-//        yesButton.setCallbackData(YES_BUTTON);
-//
-//        InlineKeyboardButton noButton = new InlineKeyboardButton();
-//
-//        noButton.setText("Нет");
-//        noButton.setCallbackData(NO_BUTTON);
-//
-//        rowInLine.add(yesButton);
-//        rowInLine.add(noButton);
-//
-//        rows.add(rowInLine);
-//
-//        markup.setKeyboard(rows);
-//
-//        message.setReplyMarkup(markup);
-//
-//        executeMessage(message);
-//
-//    }
 
     private void registerUser(Message message) {
         if (message != null && message.getChat() != null) {
@@ -288,6 +267,20 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    public void registerAdministrators(Long chatId) {
+        try {
+            GetChatAdministrators getChatAdministrators = new GetChatAdministrators();
+            List<ChatMember> administrators = execute(getChatAdministrators);
+            List<Long> administratorsIds = new ArrayList<>();
+            for (ChatMember admin : administrators) {
+                administratorsIds.add(admin.getUser().getId());
+            }
+            chatAdministrators.put(chatId, administratorsIds);
+        } catch (TelegramApiException e) {
+            log.error(ERROR + e.getMessage());
+        }
+    }
+
     public List<Message> getUserMessages(Long userId) {
         return userMessages.getOrDefault(userId, new ArrayList<>());
     }
@@ -296,6 +289,31 @@ public class TelegramBot extends TelegramLongPollingBot {
         String answer = EmojiParser.parseToUnicode("Доброго здоровья, " + name + "!" + " :smiley:");
         prepareAndSendMessage(chatId, answer);
         log.info("Ответил пользователю " + name);
+    }
+
+    private void configCommandReceived(Long chatId, Long userId) {
+
+
+
+
+
+
+
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+        InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
+        InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
+
+        String welcomeAnswer = EmojiParser.parseToUnicode("Приветственное сообщение " + ":wave:");
+        welcomeTextButton.setText(welcomeAnswer);
+        welcomeTextButton.setCallbackData(WELCOME_TEXT_BUTTON);
+
+        rowInLine.add(confirmButton);
+        rows.add(rowInLine);
+        markup.setKeyboard(rows);
+
+        message.setReplyMarkup(markup);
     }
 
     private void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname, Message message) {
@@ -421,8 +439,9 @@ public class TelegramBot extends TelegramLongPollingBot {
     }
 
     private void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message, Boolean isAdmin) {
-        if (isAdmin(chatId, message.getFrom().getId())) {
-            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
+        if (isAdmin) {
+            User warnedUser = userRepository.findById(warnedUserId).orElse(null);;
+            registerUser(message);
             if (warnedUser != null) {
                 try {
                     Duration muteDuration = Duration.ofDays(1);
@@ -504,7 +523,8 @@ public class TelegramBot extends TelegramLongPollingBot {
         String url9 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExN3h0MTZ4OHp0OTUwdTUwdGRyeGJoNXlzNzltdzgxdWdoc3E5NXJ0NCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/KeoW2fn76yv66qzpJw/giphy.gif";
         String url10 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDMwaHZzcjFyZmlqMmhxYXJpMzk2NDY5Z2Qyd3FubjNkazk1d2p3YSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/A3V2IWHMlFD9x9NaPD/giphy.gif";
         String url11 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExNXcxanUweXNmaXl3bXliYWVnejJtcmNxNmlnbGpjdGVwOWRobmMyeiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Zhy0nWRKx6cKkTzxUF/giphy.gif";
-        int randomizer = (int) (Math.random() * 11) + 1;
+        String url12 = "https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExZ3l4c2czejBhZ2wxZjd0MTZla3N5NW5kNXV2aXQzMjV4NTI4aTUzNCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/5TwN4gQI35fbl5F0C6/giphy.gif";
+        int randomizer = (int) (Math.random() * 12);
 
         List<String> urls = new ArrayList<>();
         urls.add(url1);
@@ -518,6 +538,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         urls.add(url9);
         urls.add(url10);
         urls.add(url11);
+        urls.add(url12);
 
         return urls.get(randomizer);
     }
@@ -687,16 +708,24 @@ public class TelegramBot extends TelegramLongPollingBot {
 //        executeMessage(message);
 //    }
 
-    private void executeEditMessageText(String text, long chatId, long messageId) {
-        EditMessageText message = new EditMessageText();
-        message.setChatId(chatId);
-        message.setText(text);
-        message.setMessageId((int) messageId);
-        try {
-            execute(message);
-        } catch (TelegramApiException e) {
-            log.error(ERROR + e.getMessage());
-        }
+//    private void executeEditMessageText(String text, long chatId, long messageId) {
+//        EditMessageText message = new EditMessageText();
+//        message.setChatId(chatId);
+//        message.setText(text);
+//        message.setMessageId((int) messageId);
+//        try {
+//            execute(message);
+//        } catch (TelegramApiException e) {
+//            log.error(ERROR + e.getMessage());
+//        }
+//    }
+
+    public static void setWelcomeMessage(String welcomeMessage) {
+        TelegramBot.welcomeMessage = welcomeMessage;
+    }
+
+    public static void setRecurrentMessage(String recurrentMessage) {
+        TelegramBot.recurrentMessage = recurrentMessage;
     }
 
     private void executeMessage(SendMessage message) {
@@ -731,17 +760,18 @@ public class TelegramBot extends TelegramLongPollingBot {
         executeMessage(message);
     }
 
-//    @Scheduled(cron = "${cron.scheduler}")
-//    private void sendAd(){
-//        Iterable<KeyWord> ads = adRepository.findAll();
-//        Iterable<User> users = userRepository.findAll();
-//
-//        for (KeyWord ad : ads) {
-//            for (User user : users) {
-//                prepareAndSendMessage(user.getChatId(), ad.getAd());
-//            }
-//        }
-//    }
+    private void prepareAndSendHTMLMessage(Long chatId, String textToSend){
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(textToSend);
+        message.setParseMode("HTML");
+        executeMessage(message);
+    }
+
+    @Scheduled(cron = "${cron.scheduler}")
+    private void sendRecurrentMessage() {
+        prepareAndSendHTMLMessage(recurrentChatId, recurrentMessage);
+    }
 
     @Override
     public String getBotUsername() {
