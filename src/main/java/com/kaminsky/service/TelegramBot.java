@@ -1,10 +1,8 @@
 package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
-import com.kaminsky.model.KeyWord;
-import com.kaminsky.model.KeyWordRepository;
+import com.kaminsky.model.*;
 import com.kaminsky.model.User;
-import com.kaminsky.model.UserRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +18,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.*;
+import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllChatAdministrators;
@@ -43,7 +42,10 @@ public class TelegramBot extends TelegramLongPollingBot {
     private UserRepository userRepository;
 
     @Autowired
-    private KeyWordRepository adRepository;
+    private KeyWordRepository keyWordRepository;
+
+    @Autowired
+    private BotMessageRepository botMessageRepository;
 
     final BotConfig config;
 
@@ -57,15 +59,15 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
 
+    private Map<Long, String> chatInfo = new HashMap<>();
+
     static final String ERROR = "Ошибка ";
 
     static final String UNKNOWN_COMMAND = "Мне незнакома эта команда.";
 
-    static final String HELP_TEXT = "Это бот проекта «Сокрытая Русь» и общества сщмч. Андрея (Ухтомского)\n" +
-                                    "Основной функционал бота направлен на администрирование чата и связь с модераторами\n" +
+    static final String HELP_TEXT = "Это бот проекта «Сокрытая Русь» и общества сщмч. Андрея (Ухтомского)\n\n" +
+                                    "Основной функционал бота направлен на администрирование чата и связь с модераторами\n\n" +
                                     "Вы можете увидеть доступные команды в меню слева";
-
-    static final String CONFIG_TEXT = "Что вы хотите настроить?";
 
     static final String NOT_ADMIN_ERROR = "Для этого нужны права адмистратора.";
 
@@ -73,16 +75,17 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     static final String WELCOME_TEXT_BUTTON = "WELCOME_TEXT_BUTTON";
 
-    static final String CONFIG_BUTTON = "CONFIG_BUTTON";
+    static final String RECURRENT_TEXT_BUTTON = "RECURRENT_TEXT_BUTTON";
 
-    static String welcomeMessage = "Милости прошу к нашему шалашу";
+    static Long currentChatIdForWelcomeText = null;
 
-    static String recurrentMessage = "Милости прошу к нашим тематическим шалашам";
+    static Long currentChatIdForRecurrentText = null;
 
-    static Long recurrentChatId = 0L;
+    static boolean isAwaitingWelcomeText = false;
 
-    @Autowired
-    private KeyWordRepository keyWordRepository;
+    static boolean isAwaitingRecurrentText = false;
+
+    static boolean isCommandHandled = false;
 
     public TelegramBot(BotConfig config) {
         this.config = config;
@@ -109,26 +112,53 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
+
         if (update.hasCallbackQuery()) {
-            handleCallbackQuery(update.getCallbackQuery());
-            return;
+            if (update.getCallbackQuery().getData().startsWith("CONFIRM_BUTTON")) {
+                handleWelcomeCallbackQuery(update.getCallbackQuery());
+                return;
+            } else if (update.getCallbackQuery().getData().startsWith("WELCOME_TEXT_BUTTON")) {
+                handleSetWelcomeTextCallbackQuery(update.getCallbackQuery(), update.getCallbackQuery().getMessage().getChatId());
+                return;
+            } else if (update.getCallbackQuery().getData().startsWith("WELCOME_TEXT_BUTTON")) {
+                handleSetRecurrentTextCallbackQuery(update.getCallbackQuery(), update.getCallbackQuery().getMessage().getChatId());
+                return;
+            } else {
+                handleConfigCallbackQuery(update.getCallbackQuery());
+                return;
+            }
         }
+
         String botUsername = getBotUsername();
+        Long botId = 0L;
+
+        try {
+            botId = getMe().getId();
+        } catch (TelegramApiException e) {
+            log.warn("Не удалось получить id бота");
+        }
 
 //        boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
 
-        boolean isReplyToBot = update.getMessage().isReply() &&
-                update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
+        boolean isReplyToBot = false;
 
-        if (update.hasMessage() && update.getMessage().getNewChatMembers() != null && !update.getMessage().getNewChatMembers().isEmpty()) {
-            Long chatId = update.getMessage().getChatId();
-            popupCaptcha(update, chatId);
+        if (update.hasMessage() && update.getMessage() != null) {
+            isReplyToBot = update.getMessage().isReply() &&
+                    update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
+        }
+
+        if (update.hasMessage() && update.getMessage() != null) {
+            if (update.getMessage().isReply()) {
+                org.telegram.telegrambots.meta.api.objects.User replyToUser = update.getMessage().getReplyToMessage().getFrom();
+                if (replyToUser != null && replyToUser.getUserName() != null) {
+                    isReplyToBot = replyToUser.getUserName().equals(botUsername);
+                }
+            }
         }
 
         if (update.hasMessage()) {
+            setChatInfo(update);
             Long chatId = update.getMessage().getChatId();
-            recurrentChatId = chatId;
-            registerAdministrators(chatId);
             String messageText = "";
             Message message = update.getMessage();
             Long userId = message.getFrom().getId();
@@ -142,27 +172,34 @@ public class TelegramBot extends TelegramLongPollingBot {
 
             if (message.hasText()) {
                 messageText = message.getText();
+                handleIncomingWelcomeTextSettingMessage(message);
+                handleIncomingRecurrentTextSettingMessage(message);
                 List<String> keyWords = getKeyWords();
                 if (isContainKeyWords(keyWords, messageText)) {
                     sendRandomGif(message.getChatId());
                     muteUser(message.getChatId(), message.getFrom().getId(), message.getFrom().getFirstName(), message, true);
                 }
-            }
 
-            boolean isGroupChat = update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat();
-            boolean isPrivateChat = update.getMessage().getChat().isUserChat();
 
-            if (isPrivateChat) {
-                handlePrivateCommand(chatId, messageText, update);
-            }
+                boolean isGroupChat = update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat();
+                boolean isPrivateChat = update.getMessage().getChat().isUserChat();
 
-            if (isGroupChat && (isReplyToBot || update.getMessage().getText().contains("@" + botUsername))) {
-                handleGroupChatCommand(chatId, messageText, update);
+                if (isPrivateChat) {
+                    handlePrivateCommand(chatId, messageText, update, botId);
+                }
+
+                if (isGroupChat) {
+                    registerAdministrators(chatId);
+                }
+
+                if (isGroupChat && (isReplyToBot || update.getMessage().getText().contains("@" + botUsername))) {
+                    handleGroupChatCommand(chatId, messageText, update);
+                }
             }
         }
     }
 
-    private void handlePrivateCommand(long chatId, String messageText, Update update) {
+    private void handlePrivateCommand(Long chatId, String messageText, Update update, Long botId) {
         if (messageText.contains("/send") && config.getOwnerId() == chatId) {
             String textToSend = EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
             Iterable<User> users = userRepository.findAll();
@@ -179,10 +216,14 @@ public class TelegramBot extends TelegramLongPollingBot {
                     prepareAndSendMessage(chatId, HELP_TEXT);
                     break;
                 case "/config":
-
+                    configCommandReceived(chatId, update.getMessage().getChat().getId(), botId);
                     break;
                 default:
-                    prepareAndSendMessage(chatId, UNKNOWN_COMMAND);
+                    if (!isCommandHandled) {
+                        prepareAndSendMessage(chatId, UNKNOWN_COMMAND);
+                    } else {
+                        isCommandHandled = false;
+                    }
             }
         }
     }
@@ -218,7 +259,7 @@ public class TelegramBot extends TelegramLongPollingBot {
             }
         }
 
-    private void handleCallbackQuery(CallbackQuery callbackQuery) {
+    private void handleWelcomeCallbackQuery(CallbackQuery callbackQuery) {
         log.info("Получен callbackQuery с данными: " + callbackQuery.getData());
         String callbackData = callbackQuery.getData();
         long userId = callbackQuery.getFrom().getId();
@@ -229,21 +270,187 @@ public class TelegramBot extends TelegramLongPollingBot {
 
         String[] callbackDataParts = callbackData.split(":");
         String button = callbackDataParts[0];
-        long targetUserId = Long.parseLong(callbackDataParts[1]);
+        Long targetUserId = Long.parseLong(callbackDataParts[1]);
 
         if (button.equals(CONFIRM_BUTTON) && targetUserId == userId) {
             userCaptchaStatus.put(userId, true);
             try {
+                Optional<BotMessage> botMessage = botMessageRepository.findById(chatId);
+                String welcomeMessage = "";
+                if (!botMessage.isEmpty()) {
+                    if (botMessage.get().getWelcomeMessage() != null)
+                        welcomeMessage = botMessage.get().getWelcomeMessage();
+                }
                 EditMessageText editMessage = new EditMessageText();
                 editMessage.setChatId(String.valueOf(chatId));
                 editMessage.setMessageId((int) messageId);
-                editMessage.setText("Добро пожаловать, " + userLink + "\n" + welcomeMessage);
+                editMessage.setText("Добро пожаловать, " + userLink + "\n" + fixMarkdownText(welcomeMessage));
                 editMessage.setParseMode("MarkdownV2");
                 execute(editMessage);
             } catch (TelegramApiException e) {
                 log.error(ERROR + e.getMessage());
             }
         }
+    }
+
+    private String fixMarkdownText(String text) {
+        return text
+                .replace("_", "\\_")
+                .replace("*", "\\*")
+                .replace("[", "\\[")
+                .replace("]", "\\]")
+                .replace("(", "\\(")
+                .replace(")", "\\)")
+                .replace("~", "\\~")
+                .replace("`", "\\`")
+                .replace(">", "\\>")
+                .replace("#", "\\#")
+                .replace("+", "\\+")
+                .replace("-", "\\-")
+                .replace("=", "\\=")
+                .replace("|", "\\|")
+                .replace("{", "\\{")
+                .replace("}", "\\}")
+                .replace(".", "\\.")
+                .replace("!", "\\!");
+    }
+
+    private void handleConfigCallbackQuery(CallbackQuery callbackQuery) {
+        log.info("Получен callbackQuery с данными: " + callbackQuery.getData());
+        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+        String callbackData = callbackQuery.getData();
+        Long chatId = callbackQuery.getMessage().getChatId();
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText("Что вы хотите настроить?");
+        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+        InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
+        InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
+        welcomeTextButton.setCallbackData(WELCOME_TEXT_BUTTON + ":" + callbackData);
+        welcomeTextButton.setText("Приветственное сообщение");
+        recurrentTextButton.setText("Повторяющееся сообщение");
+        recurrentTextButton.setCallbackData(RECURRENT_TEXT_BUTTON + ":" + callbackData);
+
+        rowInLine.add(welcomeTextButton);
+        rowInLine.add(recurrentTextButton);
+        rows.add(rowInLine);
+        markup.setKeyboard(rows);
+        message.setReplyMarkup(markup);
+
+            try {
+                execute(message);
+            } catch (TelegramApiException e) {
+                log.error(ERROR + e.getMessage());
+            }
+        }
+
+        private void handleSetWelcomeTextCallbackQuery(CallbackQuery callbackQuery, Long chatId) {
+            log.info("Получен callbackQuery с данными: " + callbackQuery.getData());
+            String callbackData = callbackQuery.getData();
+            String[] callbackDataParts = callbackData.split(":");
+            Long targetChatId = Long.parseLong(callbackDataParts[1]);
+            String helpMessageText = "Пришлите приветственное сообщение. Примеры:\n" +
+                    "Чтобы сделать текст жирным, используйте двойные звездочки (**):" +
+                    "**Этот текст будет жирным**\n\n" +
+                    "Чтобы сделать текст курсивным, используйте одинарные подчеркивания (_):" +
+                    "_Этот текст будет курсивом_\n\n" +
+                    "Чтобы сделать текст одновременно жирным и курсивным, используйте сочетание двойных звездочек и одинарных подчеркиваний:" +
+                    "___Этот текст будет и жирным, и курсивом___\n\n" +
+                    "Для создания гиперссылки используйте формат [] и ()" +
+                    "[Перейти на сайт](https://example.com)\n\n" +
+                    "Если нужно сделать ссылку на Telegram-профиль пользователя, формат такой:" +
+                    "\"[\" + userFirstName + \"](tg://user?id=\" + userId + \")\"\n\n" +
+                    "Для того чтобы зачеркнуть текст, используйте символы ~:" +
+                    "~Этот текст будет зачеркнут~\n\n" +
+                    "Чтобы подчеркнуть текст, используйте двойные подчеркивания:" +
+                    "__Этот текст будет подчеркнут__";
+            prepareAndSendMessage(chatId, helpMessageText);
+
+            currentChatIdForWelcomeText = targetChatId;
+            isAwaitingWelcomeText = true;
+        }
+
+    private void handleIncomingWelcomeTextSettingMessage(Message message) {
+        Long chatId = message.getChatId();
+        String text = message.getText();
+        if (isAwaitingWelcomeText && currentChatIdForWelcomeText != null) {
+            saveWelcomeText(currentChatIdForWelcomeText, text);
+            isAwaitingWelcomeText = false;
+            currentChatIdForWelcomeText = null;
+            prepareAndSendMessage(chatId, "Приветственное сообщение успешно сохранено!");
+            isCommandHandled = true;
+        }
+    }
+
+    private void saveWelcomeText(Long chatId, String welcomeText) {
+        BotMessage botMessage = botMessageRepository.findById(chatId).orElse(new BotMessage());
+        botMessage.setChatId(chatId);
+        botMessage.setWelcomeMessage(welcomeText);
+        botMessageRepository.save(botMessage);
+    }
+
+        private void handleSetRecurrentTextCallbackQuery(CallbackQuery callbackQuery, Long chatId) {
+            log.info("Получен callbackQuery с данными: " + callbackQuery.getData());
+            String callbackData = callbackQuery.getData();
+            String[] callbackDataParts = callbackData.split(":");
+            Long targetChatId = Long.parseLong(callbackDataParts[1]);
+            String helpMessageText = "Пришлите повторяющееся сообщение. Примеры:\n\n" +
+                    "Чтобы сделать текст жирным, используйте двойные звездочки (**):" +
+                    "**Этот текст будет жирным**\n\n" +
+                    "Чтобы сделать текст курсивным, используйте одинарные подчеркивания (_):" +
+                    "_Этот текст будет курсивом_\n\n" +
+                    "Чтобы сделать текст одновременно жирным и курсивным, используйте сочетание двойных звездочек и одинарных подчеркиваний:" +
+                    "___Этот текст будет и жирным, и курсивом___\n\n" +
+                    "Для создания гиперссылки используйте формат [] и ()" +
+                    "[Перейти на сайт](https://example.com)\n\n" +
+                    "Если нужно сделать ссылку на Telegram-профиль пользователя, формат такой:" +
+                    "\"[\" + userFirstName + \"](tg://user?id=\" + userId + \")\"\n\n" +
+                    "Для того чтобы зачеркнуть текст, используйте символы ~:" +
+                    "~Этот текст будет зачеркнут~\n\n" +
+                    "Чтобы подчеркнуть текст, используйте двойные подчеркивания:" +
+                    "__Этот текст будет подчеркнут__";
+            prepareAndSendMessage(chatId, helpMessageText);
+
+            currentChatIdForRecurrentText = targetChatId;
+            isAwaitingRecurrentText = true;
+        }
+
+    private void handleIncomingRecurrentTextSettingMessage(Message message) {
+        Long chatId = message.getChatId();
+        String text = message.getText();
+        if (isAwaitingRecurrentText && currentChatIdForRecurrentText != null) {
+            saveRecurrentText(currentChatIdForRecurrentText, text);
+            isAwaitingRecurrentText = false;
+            currentChatIdForRecurrentText = null;
+            prepareAndSendMessage(chatId, "Повторяющееся сообщение успешно сохранено!");
+            isCommandHandled = true;
+        }
+    }
+
+    private void saveRecurrentText(Long chatId, String recurrentText) {
+        BotMessage botMessage = botMessageRepository.findById(chatId).orElse(new BotMessage());
+        botMessage.setChatId(chatId);
+        botMessage.setRecurrentMessage(recurrentText);
+        botMessageRepository.save(botMessage);
+    }
+
+
+    private void setChatInfo(Update update) {
+        if (update.getMessage().getChat().getTitle() != null && (!chatInfo.containsKey(update.getMessage().getChatId()))) {
+            Long chatId = update.getMessage().getChatId();
+            String chatName = update.getMessage().getChat().getTitle();
+            chatInfo.put(chatId, chatName);
+        }
+    }
+
+    private boolean isNewChatMemberSokrytBot(Update update, Long botId) {
+        for (org.telegram.telegrambots.meta.api.objects.User newUser : update.getMessage().getNewChatMembers()) {
+            if (newUser.getId().equals(botId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void registerUser(Message message) {
@@ -270,6 +477,7 @@ public class TelegramBot extends TelegramLongPollingBot {
     public void registerAdministrators(Long chatId) {
         try {
             GetChatAdministrators getChatAdministrators = new GetChatAdministrators();
+            getChatAdministrators.setChatId(chatId.toString());
             List<ChatMember> administrators = execute(getChatAdministrators);
             List<Long> administratorsIds = new ArrayList<>();
             for (ChatMember admin : administrators) {
@@ -291,29 +499,58 @@ public class TelegramBot extends TelegramLongPollingBot {
         log.info("Ответил пользователю " + name);
     }
 
-    private void configCommandReceived(Long chatId, Long userId) {
-
-
-
-
-
-
-
+    private void configCommandReceived(Long chatId, Long userId, Long botId) {
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
         List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
-        InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
-        InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
+        List<Long> menuChatIds = new ArrayList<>();
+        for (Map.Entry<Long, List<Long>> entry : chatAdministrators.entrySet()) {
+            Long key = entry.getKey();
+            List<Long> adminList = entry.getValue();
+                if (adminList.contains(userId) && (adminList.contains(botId))) {
+                    menuChatIds.add(key);
+                }
+        }
+        if (menuChatIds.size() > 0) {
+            SendMessage message = new SendMessage();
+            message.setChatId(chatId);
+            message.setText("Какой чат вы хотите настроить?");
 
-        String welcomeAnswer = EmojiParser.parseToUnicode("Приветственное сообщение " + ":wave:");
-        welcomeTextButton.setText(welcomeAnswer);
-        welcomeTextButton.setCallbackData(WELCOME_TEXT_BUTTON);
+            for (Long menuChatId : menuChatIds) {
+                List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+                InlineKeyboardButton button = new InlineKeyboardButton();
+                button.setCallbackData(menuChatId.toString());
+                button.setText(chatInfo.get(menuChatId));
 
-        rowInLine.add(confirmButton);
-        rows.add(rowInLine);
-        markup.setKeyboard(rows);
+                rowInLine.add(button);
+                rows.add(rowInLine);
+                markup.setKeyboard(rows);
+                message.setReplyMarkup(markup);
+            }
 
-        message.setReplyMarkup(markup);
+            try {
+                    execute(message);
+                } catch (TelegramApiException e) {
+                    log.error(ERROR + e.getMessage());
+                }
+        }
+
+
+
+//        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+//        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+//        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+//        InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
+//        InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
+//
+//        String welcomeAnswer = EmojiParser.parseToUnicode("Приветственное сообщение " + ":wave:");
+//        welcomeTextButton.setText(welcomeAnswer);
+//        welcomeTextButton.setCallbackData(WELCOME_TEXT_BUTTON);
+//
+//        rowInLine.add(confirmButton);
+//        rows.add(rowInLine);
+//        markup.setKeyboard(rows);
+//
+//        message.setReplyMarkup(markup);
     }
 
     private void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname, Message message) {
@@ -720,14 +957,6 @@ public class TelegramBot extends TelegramLongPollingBot {
 //        }
 //    }
 
-    public static void setWelcomeMessage(String welcomeMessage) {
-        TelegramBot.welcomeMessage = welcomeMessage;
-    }
-
-    public static void setRecurrentMessage(String recurrentMessage) {
-        TelegramBot.recurrentMessage = recurrentMessage;
-    }
-
     private void executeMessage(SendMessage message) {
         try {
             execute(message);
@@ -768,9 +997,34 @@ public class TelegramBot extends TelegramLongPollingBot {
         executeMessage(message);
     }
 
+    private void prepareAndSendMarkdownMessage(Long chatId, String textToSend, Integer replyToMessageId){
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(textToSend);
+        message.setParseMode("MarkdownV2");
+        executeMessage(message);
+    }
+
+    private void prepareAndSendMarkdownMessage(Long chatId, String textToSend){
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(textToSend);
+        message.setParseMode("MarkdownV2");
+        executeMessage(message);
+    }
+
     @Scheduled(cron = "${cron.scheduler}")
     private void sendRecurrentMessage() {
-        prepareAndSendHTMLMessage(recurrentChatId, recurrentMessage);
+        Iterable<BotMessage> botMessages = botMessageRepository.findAll();
+        Long chatId;
+        String recurrentMessage = "";
+        for (BotMessage botMessage : botMessages) {
+            chatId = botMessage.getChatId();
+            if (botMessage.getRecurrentMessage() != null) {
+                recurrentMessage = botMessage.getRecurrentMessage();
+            }
+            prepareAndSendMarkdownMessage(chatId, fixMarkdownText(recurrentMessage));
+        }
     }
 
     @Override
