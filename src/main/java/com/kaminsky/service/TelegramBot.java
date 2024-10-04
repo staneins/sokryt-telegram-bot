@@ -24,7 +24,9 @@ import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllChatAdministrators;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllPrivateChats;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.sql.Timestamp;
@@ -138,14 +140,14 @@ public class TelegramBot extends TelegramLongPollingBot {
             log.warn("Не удалось получить id бота");
         }
 
-//        boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
+        if (update.hasMessage() && update.getMessage().getNewChatMembers() != null && !update.getMessage().getNewChatMembers().isEmpty()) {
+            Long chatId = update.getMessage().getChatId();
+            if (!isNewChatMemberSokrytBot(update, botId)) {
+                popupCaptcha(update, chatId);
+            }
+        }
 
         boolean isReplyToBot = false;
-
-        if (update.hasMessage() && update.getMessage() != null) {
-            isReplyToBot = update.getMessage().isReply() &&
-                    update.getMessage().getReplyToMessage().getFrom().getUserName().equals(botUsername);
-        }
 
         if (update.hasMessage() && update.getMessage() != null) {
             if (update.getMessage().isReply()) {
@@ -171,6 +173,10 @@ public class TelegramBot extends TelegramLongPollingBot {
             userMessages.get(userId).add(message);
 
             if (message.hasText()) {
+                boolean isBotMentioned = update.getMessage().getText().contains("@" + botUsername);
+                if (isBotMentioned) {
+                    prepareAndSendMessage(chatId, "Чего надо?", update.getMessage().getMessageId());
+                }
                 messageText = message.getText();
                 handleIncomingWelcomeTextSettingMessage(message);
                 handleIncomingRecurrentTextSettingMessage(message);
@@ -217,6 +223,18 @@ public class TelegramBot extends TelegramLongPollingBot {
                     break;
                 case "/config":
                     configCommandReceived(chatId, update.getMessage().getChat().getId(), botId);
+                    break;
+                case "сайт проекта":
+
+                    break;
+                case "петиция о разбане":
+
+                    break;
+                case "FAQ о Единоверии":
+
+                    break;
+                case "карта приходов":
+
                     break;
                 default:
                     if (!isCommandHandled) {
@@ -495,7 +513,33 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     private void startCommandReceived(Long chatId, String name) {
         String answer = EmojiParser.parseToUnicode("Доброго здоровья, " + name + "!" + " :smiley:");
-        prepareAndSendMessage(chatId, answer);
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId);
+        message.setText(answer);
+
+        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
+        List<KeyboardRow> keyboardRows = new ArrayList<>();
+        KeyboardRow row = new KeyboardRow();
+
+        row.add("петиция о разбане");
+        row.add("сайт проекта");
+
+        keyboardRows.add(row);
+
+        row = new KeyboardRow();
+
+        row.add("FAQ о Единоверии");
+        row.add("карта приходов");
+
+        keyboardRows.add(row);
+
+        keyboardMarkup.setKeyboard(keyboardRows);
+        keyboardMarkup.setResizeKeyboard(true);
+        keyboardMarkup.setOneTimeKeyboard(true);
+
+        message.setReplyMarkup(keyboardMarkup);
+
+        executeMessage(message);
         log.info("Ответил пользователю " + name);
     }
 
@@ -533,24 +577,6 @@ public class TelegramBot extends TelegramLongPollingBot {
                     log.error(ERROR + e.getMessage());
                 }
         }
-
-
-
-//        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-//        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-//        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
-//        InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
-//        InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
-//
-//        String welcomeAnswer = EmojiParser.parseToUnicode("Приветственное сообщение " + ":wave:");
-//        welcomeTextButton.setText(welcomeAnswer);
-//        welcomeTextButton.setCallbackData(WELCOME_TEXT_BUTTON);
-//
-//        rowInLine.add(confirmButton);
-//        rows.add(rowInLine);
-//        markup.setKeyboard(rows);
-//
-//        message.setReplyMarkup(markup);
     }
 
     private void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname, Message message) {
@@ -917,45 +943,6 @@ public class TelegramBot extends TelegramLongPollingBot {
             return false;
         }
     }
-
-
-//    private void keyboardMethod(long chatId, String textToSend) {
-//
-//        ReplyKeyboardMarkup keyboardMarkup = new ReplyKeyboardMarkup();
-//        List<KeyboardRow> keyboardRows = new ArrayList<>();
-//        KeyboardRow row = new KeyboardRow();
-//
-//        row.add("петиция о разбане");
-//        row.add("сайт проекта");
-//
-//        keyboardRows.add(row);
-//
-//        row = new KeyboardRow();
-//
-//        row.add("FAQ о Единоверии");
-//        row.add("карта приходов");
-//        row.add("обучение");
-//
-//        keyboardRows.add(row);
-//
-//        keyboardMarkup.setKeyboard(keyboardRows);
-//
-//        message.setReplyMarkup(keyboardMarkup);
-//
-//        executeMessage(message);
-//    }
-
-//    private void executeEditMessageText(String text, long chatId, long messageId) {
-//        EditMessageText message = new EditMessageText();
-//        message.setChatId(chatId);
-//        message.setText(text);
-//        message.setMessageId((int) messageId);
-//        try {
-//            execute(message);
-//        } catch (TelegramApiException e) {
-//            log.error(ERROR + e.getMessage());
-//        }
-//    }
 
     private void executeMessage(SendMessage message) {
         try {
