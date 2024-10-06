@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
@@ -69,7 +70,7 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     static final String HELP_TEXT = "Это бот проекта «Сокрытая Русь» и общества сщмч. Андрея (Ухтомского)\n\n" +
                                     "Основной функционал бота направлен на администрирование чата и связь с модераторами\n\n" +
-                                    "Вы можете увидеть доступные команды в меню слева";
+                                    "Вы можете увидеть доступные команды в меню слева и снизу";
 
     static final String NOT_ADMIN_ERROR = "Для этого нужны права адмистратора.";
 
@@ -88,6 +89,10 @@ public class TelegramBot extends TelegramLongPollingBot {
     static boolean isAwaitingRecurrentText = false;
 
     static boolean isCommandHandled = false;
+
+    static boolean isAwaitingUnbanPetition = false;
+
+    static final Long ownerId = 166759493L;
 
     public TelegramBot(BotConfig config) {
         this.config = config;
@@ -180,6 +185,7 @@ public class TelegramBot extends TelegramLongPollingBot {
                 messageText = message.getText();
                 handleIncomingWelcomeTextSettingMessage(message);
                 handleIncomingRecurrentTextSettingMessage(message);
+                handleUnbanPetition(message);
                 List<String> keyWords = getKeyWords();
                 if (isContainKeyWords(keyWords, messageText)) {
                     sendRandomGif(message.getChatId());
@@ -225,16 +231,27 @@ public class TelegramBot extends TelegramLongPollingBot {
                     configCommandReceived(chatId, update.getMessage().getChat().getId(), botId);
                     break;
                 case "сайт проекта":
-
+                    String projectLink = "[Сайт проекта «Сокрытая Русь»](https://sokryt.ru)";
+                    prepareAndSendMarkdownMessage(chatId, projectLink);
                     break;
                 case "петиция о разбане":
-
+                    String askText = "Сформулируйте Ваше прошение о разбане в одно сообщение";
+                    prepareAndSendMessage(chatId, askText);
+                    isAwaitingUnbanPetition = true;
                     break;
                 case "FAQ о Единоверии":
-
+                    String faq = "Единоверие - одно из течений поповского старообрядчества, находящееся под юрисдикцией Русской Православной Церкви.\n" +
+                            "По определению епископа Симона (Шлеёва), «единоверие есть примирённое с Русской и Вселенской Церковью старообрядчество».\n\n" +
+                            "Q: Нужно ли совершать некий чин присоединения в Единоверие для обычных прихожан РПЦ?\n" +
+                            "A: Нет, достаточно просто начать ходить в ближайший единоверческий приход.\n\n" +
+                            "Q: Почитают ли единоверцы послераскольных святых?\n" +
+                            "A: Согласно поместному собору Русской Православной Церкви 1918 г., единоверцы совершают богослослужения исключительно по старопечатным книгам." +
+                            " Таким образом, на единоверческих службах послераскольные святые не упоминаются, однако как чада Русской Православной Церкви, единоверцы почитают и признают святость всех святых, канонизированных РПЦ.";
+                    prepareAndSendMessage(chatId, faq);
                     break;
                 case "карта приходов":
-
+                    String mapLink = "Актуальная карта старообрядных и единоверческих приходов\n\n [перейти по ссылке](https://sokryt.ru/map)";
+                    prepareAndSendMarkdownMessage(chatId, mapLink);
                     break;
                 default:
                     if (!isCommandHandled) {
@@ -398,6 +415,24 @@ public class TelegramBot extends TelegramLongPollingBot {
             currentChatIdForWelcomeText = null;
             prepareAndSendMessage(chatId, "Приветственное сообщение успешно сохранено!");
             isCommandHandled = true;
+        }
+    }
+
+    private void handleUnbanPetition(Message message) {
+        if (isAwaitingUnbanPetition) {
+            Long chatId = message.getChatId();
+            ForwardMessage forwardMessage = new ForwardMessage();
+            forwardMessage.setChatId(ownerId.toString());
+            forwardMessage.setFromChatId(chatId.toString());
+            forwardMessage.setMessageId(message.getMessageId());
+            try {
+                execute(forwardMessage);
+                prepareAndSendMessage(chatId,"Ваше сообщение отправлено администрации. С Вами свяжутся");
+                isAwaitingUnbanPetition = false;
+                isCommandHandled = true;
+            } catch (TelegramApiException e) {
+                log.error(ERROR + e.getMessage());
+            }
         }
     }
 
