@@ -1,17 +1,19 @@
 package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
+import com.kaminsky.finals.BotFinalVariables;
 import com.kaminsky.model.KeyWord;
 import com.kaminsky.model.repositories.KeyWordRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
 import java.util.List;
 
 @Slf4j
-@Component
+@Service
 public class CommandHandler {
 
     private final UserService userService;
@@ -22,7 +24,7 @@ public class CommandHandler {
 
     @Autowired
     public CommandHandler(UserService userService,
-                          AdminService adminService,
+                          @Lazy AdminService adminService,
                           MessageService messageService,
                           BotConfig config,
                           KeyWordRepository keyWordRepository) {
@@ -64,19 +66,10 @@ public class CommandHandler {
                 messageService.startCommandReceived(chatId, message.getChat().getFirstName());
                 break;
             case "/help":
-                messageService.sendMarkdownMessage(chatId, messageService.getHelpText());
+                messageService.sendMarkdownMessage(chatId, BotFinalVariables.HELP_TEXT);
                 break;
             case "/config":
                 adminService.handleConfigCommand(chatId, message);
-                break;
-            case "сайт проекта":
-                String projectLink = "[Сайт проекта «Сокрытая Русь»](https://sokryt.ru)";
-                messageService.sendMarkdownMessage(chatId, projectLink);
-                break;
-            case "петиция о разбане":
-                String askText = "Сформулируйте Ваше прошение о разбане в одно сообщение";
-                messageService.sendMessage(chatId, askText);
-                userService.setAwaitingUnbanPetition(true);
                 break;
             case "/ban":
             case "/mute":
@@ -86,23 +79,9 @@ public class CommandHandler {
             case "/wipe":
                 adminService.handleAdminCommand(chatId, userId, messageText, message);
                 break;
-            case "FAQ о Единоверии":
-                String faq = "Единоверие - одно из течений поповского старообрядчества, находящееся под юрисдикцией Русской Православной Церкви.\n" +
-                        "По определению епископа Симона (Шлеёва), «единоверие есть примирённое с Русской и Вселенской Церковью старообрядчество».\n\n" +
-                        "Q: Нужно ли совершать некий чин присоединения в Единоверие для обычных прихожан РПЦ?\n" +
-                        "A: Нет, достаточно просто начать ходить в ближайший единоверческий приход.\n\n" +
-                        "Q: Почитают ли единоверцы послераскольных святых?\n" +
-                        "A: Согласно поместному собору Русской Православной Церкви 1918 г., единоверцы совершают богослослужения исключительно по старопечатным книгам. " +
-                        "Таким образом, на единоверческих службах послераскольные святые не упоминаются, однако как чада Русской Православной Церкви, единоверцы почитают и признают святость всех святых, канонизированных РПЦ.";
-                messageService.sendMessage(chatId, faq);
-                break;
-            case "попасть в чат":
-                String mapLink = "[Главный чат Общества](https://t.me/ukhtomsky_chat)";
-                messageService.sendMarkdownMessage(chatId, mapLink);
-                break;
             default:
                 if (!userService.isCommandHandled()) {
-                    messageService.sendMessage(chatId, messageService.getUnknownCommand());
+                    messageService.sendMessage(chatId, BotFinalVariables.UNKNOWN_COMMAND);
                 } else {
                     userService.setCommandHandled(false);
                 }
@@ -124,19 +103,39 @@ public class CommandHandler {
         handleIncomingRecurrentTextSettingMessage(message);
         handleUnbanPetition(message);
 
+        switch (messageText) {
+            case "сайт проекта":
+                String projectLink = "[Сайт проекта «Сокрытая Русь»](https://sokryt.ru)";
+                messageService.sendMarkdownMessage(chatId, projectLink);
+                break;
+            case "петиция о разбане":
+                String askText = "Сформулируйте Ваше прошение о разбане в одно сообщение";
+                messageService.sendMessage(chatId, askText);
+                userService.setAwaitingUnbanPetition(true);
+                break;
+            case "FAQ о Единоверии":
+                String faq = "Единоверие - одно из течений поповского старообрядчества, находящееся под юрисдикцией Русской Православной Церкви.\n" +
+                        "По определению епископа Симона (Шлеёва), «единоверие есть примирённое с Русской и Вселенской Церковью старообрядчество».\n\n" +
+                        "Q: Нужно ли совершать некий чин присоединения в Единоверие для обычных прихожан РПЦ?\n" +
+                        "A: Нет, достаточно просто начать ходить в ближайший единоверческий приход.\n\n" +
+                        "Q: Почитают ли единоверцы послераскольных святых?\n" +
+                        "A: Согласно поместному собору Русской Православной Церкви 1918 г., единоверцы совершают богослужения исключительно по старопечатным книгам. " +
+                        "Таким образом, на единоверческих службах послераскольные святые не упоминаются, однако как чада Русской Православной Церкви, единоверцы почитают и признают святость всех святых, канонизированных РПЦ.";
+                messageService.sendMessage(chatId, faq);
+                break;
+            case "вступить в чат":
+                String mapLink = "[Главный чат Общества](https://t.me/ukhtomsky_chat)";
+                messageService.sendMarkdownMessage(chatId, mapLink);
+                break;
+        }
+
         List<String> keyWords = getKeyWords();
         if (isContainKeyWords(keyWords, messageText)) {
             messageService.sendRandomGif(chatId);
             adminService.muteUser(chatId, message.getFrom().getId(), message.getFrom().getFirstName(), message, true);
         }
-
-//        if (message.getChat().isGroupChat() || message.getChat().isSuperGroupChat()) {
-//            adminService.registerAdministrators(chatId);
-//            if (message.isReply() || isBotMentioned) {
-//                adminService.handleGroupChatCommand(chatId, messageText, message);
-//            }
-//        }
     }
+
 
     public void handleIncomingWelcomeTextSettingMessage(Message message) {
         Long chatId = message.getChatId();

@@ -1,48 +1,46 @@
 package com.kaminsky.service;
 
-import com.kaminsky.model.BotMessage;
-import com.kaminsky.model.repositories.BotMessageRepository;
+import com.kaminsky.events.*;
+import com.kaminsky.finals.BotFinalVariables;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
-import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChat;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
-import org.telegram.telegrambots.meta.api.objects.Chat;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.api.methods.send.SendAnimation;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 
 
 @Slf4j
-@Component
+@Service
 public class MessageService {
 
-    private final TelegramBot telegramBot;
     private final Map<Long, List<Message>> userMessages = new ConcurrentHashMap<>();
-    private final BotMessageRepository botMessageRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Autowired
-    public MessageService(TelegramBot telegramBot, ChatAdminService chatAdminService, BotMessageRepository botMessageRepository) {
-        this.telegramBot = telegramBot;
-        this.botMessageRepository = botMessageRepository;
+    public MessageService(ApplicationEventPublisher eventPublisher) {
+        this.eventPublisher = eventPublisher;
     }
 
     public void startCommandReceived(Long chatId, String name) {
@@ -86,10 +84,10 @@ public class MessageService {
         InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
         InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
 
-        welcomeTextButton.setCallbackData(telegramBot.getWelcomeTextButton() + ":" + chatId);
+        welcomeTextButton.setCallbackData(BotFinalVariables.WELCOME_TEXT_BUTTON + ":" + chatId);
         welcomeTextButton.setText("Приветствие");
 
-        recurrentTextButton.setCallbackData(telegramBot.getRecurrentTextButton() + ":" + chatId);
+        recurrentTextButton.setCallbackData(BotFinalVariables.RECURRENT_TEXT_BUTTON + ":" + chatId);
         recurrentTextButton.setText("Автосообщение");
 
         rowInLine.add(welcomeTextButton);
@@ -104,51 +102,45 @@ public class MessageService {
     }
 
     public void executeEditMessage(EditMessageText editMessageText) {
-        try {
-            telegramBot.execute(editMessageText);
-        } catch (TelegramApiException e) {
-            log.error(telegramBot.getError() + e.getMessage());
-        }
+        eventPublisher.publishEvent(new EditMessageTextEvent(editMessageText));
+        log.info("Публикация события EditMessageTextEvent");
     }
 
     public void executeBanChatMember(BanChatMember banChatMember) {
-        try {
-            telegramBot.execute(banChatMember);
-        } catch (TelegramApiException e) {
-            log.error(telegramBot.getError() + e.getMessage());
-        }
+        eventPublisher.publishEvent(new BanChatMemberEvent(banChatMember));
+        log.info("Публикация события BanChatMemberEvent");
+    }
+
+    public void executeRestrictChatMember(RestrictChatMember restrictChatMember) {
+        eventPublisher.publishEvent(new RestrictChatMemberEvent(restrictChatMember));
+        log.info("Публикация события RestrictChatMemberEvent");
     }
 
     public void executeDeleteMessage(DeleteMessage deleteMessage) {
-        try {
-            telegramBot.execute(deleteMessage);
-        } catch (TelegramApiException e) {
-            log.error(telegramBot.getError() + e.getMessage());
-        }
+        eventPublisher.publishEvent(new DeleteMessageEvent(deleteMessage));
+        log.info("Публикация события DeleteMessageEvent");
     }
 
     public void executeForwardMessage(ForwardMessage forwardMessage) {
-        try {
-            telegramBot.execute(forwardMessage);
-        } catch (TelegramApiException e) {
-            log.error(telegramBot.getError() + e.getMessage());
-        }
+        eventPublisher.publishEvent(new ForwardMessageEvent(forwardMessage));
+        log.info("Публикация события ForwardMessageEvent");
     }
 
     public void sendMessage(Long chatId, String textToSend) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId.toString());
         message.setText(textToSend);
-        executeMessage(message);
-        log.info("Отправлено сообщение в чат " + chatId + ": " + textToSend);
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent для чата " + chatId);
     }
 
     public void sendMessage(Long chatId, String textToSend, Integer replyToMessageId) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId.toString());
         message.setText(textToSend);
-        executeMessage(message);
-        log.info("Отправлено HTML-сообщение в чат " + chatId + " в ответ на сообщение " + replyToMessageId + ": " + textToSend);
+        message.setReplyToMessageId(replyToMessageId);
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent с ответом на сообщение для чата " + chatId);
     }
 
     public void sendHTMLMessage(Long chatId, String textToSend) {
@@ -156,8 +148,8 @@ public class MessageService {
         message.setChatId(chatId.toString());
         message.setText(textToSend);
         message.setParseMode("HTML");
-        executeMessage(message);
-        log.info("Отправлено HTML-сообщение в чат " + chatId + ": " + textToSend);
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent (HTML) для чата " + chatId);
     }
 
     public void sendHTMLMessage(Long chatId, String textToSend, Integer replyToMessageId) {
@@ -166,8 +158,8 @@ public class MessageService {
         message.setText(textToSend);
         message.setReplyToMessageId(replyToMessageId);
         message.setParseMode("HTML");
-        executeMessage(message);
-        log.info("Отправлено HTML-сообщение в чат " + chatId + " в ответ на сообщение " + replyToMessageId + ": " + textToSend);
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent (HTML) с ответом на сообщение для чата " + chatId);
     }
 
     public void sendMarkdownMessage(Long chatId, String textToSend) {
@@ -175,8 +167,8 @@ public class MessageService {
         message.setChatId(chatId.toString());
         message.setText(fixMarkdownText(textToSend));
         message.setParseMode("MarkdownV2");
-        executeMessage(message);
-        log.info("Отправлено MarkdownV2-сообщение в чат " + chatId + ": " + textToSend);
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent (MarkdownV2) для чата " + chatId);
     }
 
     public void sendMarkdownMessage(Long chatId, String textToSend, Integer replyToMessageId) {
@@ -185,10 +177,9 @@ public class MessageService {
         message.setText(fixMarkdownText(textToSend));
         message.setReplyToMessageId(replyToMessageId);
         message.setParseMode("MarkdownV2");
-        executeMessage(message);
-        log.info("Отправлено HTML-сообщение в чат " + chatId + " в ответ на сообщение " + replyToMessageId + ": " + textToSend);
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent (MarkdownV2) с ответом на сообщение для чата " + chatId);
     }
-
     public String fixMarkdownText(String text) {
         return text
                 .replace("_", "\\_")
@@ -211,21 +202,27 @@ public class MessageService {
                 .replace("!", "\\!");
     }
 
-    public List<ChatMember> executeGetChatAdministrators(GetChatAdministrators administrators) {
+    public List<ChatMember> executeGetChatAdministrators(GetChatAdministrators getChatAdministrators) {
+        CompletableFuture<List<ChatMember>> future = new CompletableFuture<>();
+        eventPublisher.publishEvent(new GetChatAdministratorsEvent(getChatAdministrators, future));
         try {
-            return telegramBot.execute(administrators);
-        } catch (TelegramApiException e) {
-            log.error(telegramBot.getError() + e.getMessage());
+            return future.get();
+        } catch (InterruptedException | ExecutionException e) {
+            log.error("Ошибка при получении администраторов чата: " + e.getMessage());
+            return null;
         }
-        return null;
     }
 
-    private void executeMessage(SendMessage message) {
-        try {
-            telegramBot.execute(message);
-        } catch (TelegramApiException e) {
-            log.error("Ошибка при отправке сообщения: " + e.getMessage());
-        }
+    public void executeMessage(SendMessage message) {
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent для executeMessage");
+    }
+
+    public Integer executeCaptchaMessage(SendMessage message) {
+        SendCaptchaMessageEvent sendCaptchaMessageEvent = new SendCaptchaMessageEvent(message);
+        eventPublisher.publishEvent(sendCaptchaMessageEvent);
+
+        return sendCaptchaMessageEvent.getMessageId();
     }
 
     private String chooseRandomGifUrl() {
@@ -248,16 +245,13 @@ public class MessageService {
     }
 
     public void sendRandomGif(Long chatId) {
-        String gifUrl = chooseRandomGifUrl();
+        String gifUrl = chooseRandomGifUrl(); // Предполагается, что метод определен
         SendAnimation sendAnimation = new SendAnimation();
         sendAnimation.setChatId(String.valueOf(chatId));
         sendAnimation.setAnimation(new org.telegram.telegrambots.meta.api.objects.InputFile(gifUrl));
 
-        try {
-            telegramBot.execute(sendAnimation);
-        } catch (TelegramApiException e) {
-            log.error("Ошибка при отправке GIF: {}", e.getMessage());
-        }
+        eventPublisher.publishEvent(new SendAnimationEvent(sendAnimation));
+        log.info("Публикация события SendAnimationEvent для чата " + chatId);
     }
 
     public Map<Long, List<Message>> getUserMessages() {
@@ -276,58 +270,11 @@ public class MessageService {
                     DeleteMessage deleteMessage = new DeleteMessage();
                     deleteMessage.setChatId(String.valueOf(chatId));
                     deleteMessage.setMessageId(message.getMessageId());
-                    try {
-                        telegramBot.execute(deleteMessage);
-                    } catch (TelegramApiException e) {
-                        log.error("Ошибка при удалении сообщения ID {}: {}", message.getMessageId(), e.getMessage());
-                    }
+                    eventPublisher.publishEvent(new DeleteMessageEvent(deleteMessage));
+                    log.info("Публикация события DeleteMessageEvent для удаления сообщения ID " + message.getMessageId());
                 }
                 messages.clear();
             }
         }
     }
-
-    public void sendMessage(SendMessage message) {
-        try {
-            telegramBot.execute(message);
-        } catch (TelegramApiException e) {
-            log.error(getError() + e.getMessage());
-        }
-    }
-
-    public String getChatTitle(Long chatId) {
-        String chatTitle = "";
-        try {
-            Chat chat = telegramBot.execute(new GetChat(String.valueOf(chatId)));
-            chatTitle = chat.getTitle();
-        } catch (TelegramApiException e) {
-            e.printStackTrace();
-        }
-        return chatTitle;
-    }
-
-    public String getNotAnAdminError() {
-        return telegramBot.getNotAnAdminError();
-    }
-
-    public String getUnknownCommand() {
-        return telegramBot.getUnknownCommand();
-    }
-
-    public String getError() {
-        return telegramBot.getError();
-    }
-
-    public String getWelcomeTextButton() {
-        return telegramBot.getWelcomeTextButton();
-    }
-
-    public String getRecurrentTextButton() {
-        return telegramBot.getRecurrentTextButton();
-    }
-
-    public String getHelpText() {
-        return telegramBot.getHelpText();
-    }
-
 }

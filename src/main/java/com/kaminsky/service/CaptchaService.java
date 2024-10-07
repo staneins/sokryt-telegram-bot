@@ -1,12 +1,12 @@
 package com.kaminsky.service;
 
+import com.kaminsky.finals.BotFinalVariables;
 import com.kaminsky.model.BotMessage;
 import com.kaminsky.model.repositories.BotMessageRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
@@ -17,7 +17,6 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,28 +25,26 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-@Component
+@Service
 public class CaptchaService {
 
     private final UserService userService;
     private final MessageService messageService;
     private final BotMessageRepository botMessageRepository;
     private final SchedulerService schedulerService;
-    private final AdminService adminService;
 
     @Autowired
     public CaptchaService(UserService userService,
                           MessageService messageService,
                           BotMessageRepository botMessageRepository,
-                          SchedulerService schedulerService, AdminService adminService) {
+                          SchedulerService schedulerService) {
         this.userService = userService;
         this.messageService = messageService;
         this.botMessageRepository = botMessageRepository;
         this.schedulerService = schedulerService;
-        this.adminService = adminService;
     }
 
-    public void popupCaptcha(Update update, long chatId, TelegramLongPollingBot bot) {
+    public void popupCaptcha(Update update, Long chatId) {
         Message msg = update.getMessage();
         if (msg.getNewChatMembers() != null && !msg.getNewChatMembers().isEmpty()) {
             List<User> newMembers = msg.getNewChatMembers();
@@ -71,7 +68,7 @@ public class CaptchaService {
 
                 String answer = EmojiParser.parseToUnicode(":point_right:" + "Я не бот" + ":point_left:");
                 confirmButton.setText(answer);
-                confirmButton.setCallbackData("CONFIRM_BUTTON" + ":" + userId);
+                confirmButton.setCallbackData(BotFinalVariables.CONFIRM_BUTTON + ":" + userId);
 
                 rowInLine.add(confirmButton);
                 rows.add(rowInLine);
@@ -79,12 +76,9 @@ public class CaptchaService {
 
                 message.setReplyMarkup(markup);
 
-                try {
-                    Message sentMessage = bot.execute(message);
-                    handleCaptchaTimeout(chatId, newMember.getId(), sentMessage.getMessageId());
-                } catch (TelegramApiException e) {
-                    log.error("Ошибка при отправке кнопки: {}", e.getMessage());
-                }
+                Integer messageId = messageService.executeCaptchaMessage(message);
+
+                handleCaptchaTimeout(chatId, newMember.getId(), messageId);
             }
         }
     }
@@ -110,7 +104,7 @@ public class CaptchaService {
             return;
         }
 
-        if (!button.equals("CONFIRM_BUTTON")) {
+        if (!button.equals(BotFinalVariables.CONFIRM_BUTTON)) {
             log.warn("Неизвестный тип кнопки: " + button);
             return;
         }
@@ -152,7 +146,7 @@ public class CaptchaService {
                 kickChatMember.setChatId(chatId.toString());
                 kickChatMember.setUserId(userId);
                 kickChatMember.forTimePeriodDuration(kickDuration);
-                adminService.cleanUpAndShutDown(1, TimeUnit.MINUTES);
+                schedulerService.cleanUpAndShutDown(1, TimeUnit.MINUTES);
 
                 messageService.executeBanChatMember(kickChatMember);
                 log.info("Пользователь {} не прошел каптчу и был кикнут", userId);

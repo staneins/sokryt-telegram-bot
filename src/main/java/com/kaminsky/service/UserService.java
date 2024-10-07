@@ -7,7 +7,8 @@ import com.kaminsky.model.repositories.BotMessageRepository;
 import com.kaminsky.model.repositories.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
+
+import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
@@ -16,7 +17,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
-@Component
+@Service
 public class UserService {
 
     private final UserRepository userRepository;

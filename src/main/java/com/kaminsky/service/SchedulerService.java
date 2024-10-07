@@ -6,13 +6,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-@Component
+@Service
 public class SchedulerService {
 
     private final BotMessageRepository botMessageRepository;
@@ -42,16 +43,9 @@ public class SchedulerService {
         }
     }
 
-    /**
-     * Планирует выполнение задачи с заданной задержкой.
-     *
-     * @param task  Задача для выполнения
-     * @param delay Задержка перед выполнением
-     * @param unit  Единица измерения задержки
-     */
     public void scheduleTask(Runnable task, long delay, TimeUnit unit) {
         executorService.schedule(task, delay, unit);
-        log.info("Scheduled task to run in {} {}", delay, unit);
+        log.info("Запланирована задача {} {}", delay, unit);
     }
 
     public void shutdownScheduler() {
@@ -65,5 +59,12 @@ public class SchedulerService {
         executorService.scheduleAtFixedRate(() -> {
             userService.clearBannedUsers();
         }, interval, interval, timeUnit);
+    }
+
+    public void cleanUpAndShutDown(long interval, TimeUnit unit) {
+        startBannedUsersCleanupTask(interval, unit);
+        if (userService.getBannedUsers().isEmpty()) {
+            shutdownScheduler();
+        }
     }
 }

@@ -3,10 +3,11 @@ package com.kaminsky.service;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 
 @Slf4j
-@Component
+@Service
 public class CallbackQueryHandler {
 
     private final CaptchaService captchaService;
@@ -14,8 +15,7 @@ public class CallbackQueryHandler {
 
     @Autowired
     public CallbackQueryHandler(CaptchaService captchaService,
-                                AdminService adminService,
-                                MessageService messageService) {
+                                AdminService adminService) {
         this.captchaService = captchaService;
         this.adminService = adminService;
     }

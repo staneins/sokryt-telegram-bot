@@ -1,48 +1,61 @@
 package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
+import com.kaminsky.events.*;
+import com.kaminsky.model.ChatInfo;
+import com.kaminsky.model.repositories.ChatInfoRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChat;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
+import org.telegram.telegrambots.meta.api.methods.send.SendAnimation;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.api.objects.*;
+import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMember;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllChatAdministrators;
 import org.telegram.telegrambots.meta.api.objects.commands.scope.BotCommandScopeAllPrivateChats;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 @Slf4j
-@Component
+@Service
 public class TelegramBot extends TelegramLongPollingBot {
 
     private final CommandHandler commandHandler;
     private final CallbackQueryHandler callbackQueryHandler;
     private final ChatAdminService chatAdminService;
     private final BotConfig config;
-    private Long botId = 0L;
-
-    private final String welcomeTextButton = "WELCOME_TEXT_BUTTON";
-    private final String recurrentTextButton = "RECURRENT_TEXT_BUTTON";
-    private final String helpText = "Это бот проекта «Сокрытая Русь» и общества сщмч. Андрея (Ухтомского)\n\n" +
-            "Основной функционал бота направлен на администрирование чата и связь с модераторами\n\n" +
-            "Вы можете увидеть доступные команды в меню слева и снизу";
-    private final String error = "Ошибка ";
-    private final String unknownCommand = "Мне незнакома эта команда";
-    private final String notAnAdminError = "Для этого нужны права администратора";
+    private final CaptchaService captchaService;
+    private final ChatInfoRepository chatInfoRepository;
 
     @Autowired
     public TelegramBot(BotConfig config,
                        CommandHandler commandHandler,
                        CallbackQueryHandler callbackQueryHandler,
-                       ChatAdminService chatAdminService) {
+                       ChatAdminService chatAdminService,
+                       CaptchaService captchaService,
+                       ChatInfoRepository chatInfoRepository) {
         this.config = config;
         this.commandHandler = commandHandler;
         this.callbackQueryHandler = callbackQueryHandler;
         this.chatAdminService = chatAdminService;
+        this.captchaService = captchaService;
+        this.chatInfoRepository = chatInfoRepository;
         initializeCommands();
+
     }
 
     @PostConstruct
@@ -75,16 +88,19 @@ public class TelegramBot extends TelegramLongPollingBot {
 
     @Override
     public void onUpdateReceived(Update update) {
-        try {
-            botId = getMe().getId();
-        } catch (TelegramApiException e) {
-            throw new RuntimeException(e);
+
+        if (update.hasMessage() && update.getMessage().getNewChatMembers() != null && !update.getMessage().getNewChatMembers().isEmpty()) {
+            Long chatId = update.getMessage().getChatId();
+            if (!isNewChatMemberSokrytBot(update)) {
+                captchaService.popupCaptcha(update, chatId);
+            }
         }
 
         if (update.hasMessage()) {
             long chatId = update.getMessage().getChatId();
             if (update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat()) {
                 chatAdminService.registerAdministrators(chatId);
+                registerChatInfo(chatId);
             }
             commandHandler.handleMessage(update.getMessage());
         }
@@ -94,32 +110,138 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    public Long getBotId() {
-        return botId;
+    private boolean isNewChatMemberSokrytBot(Update update) {
+        Long botId = config.getBotId();
+        for (org.telegram.telegrambots.meta.api.objects.User newUser : update.getMessage().getNewChatMembers()) {
+            if (newUser.getId().equals(botId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    public String getNotAnAdminError() {
-        return notAnAdminError;
+    private void registerChatInfo(Long chatId) {
+        if (!chatInfoRepository.existsById(chatId)) {
+            ChatInfo chatInfo = new ChatInfo();
+            chatInfo.setChatTitle(getChatTitle(chatId));
+            chatInfo.setChatId(chatId);
+            chatInfoRepository.save(chatInfo);
+        }
     }
 
-    public String getUnknownCommand() {
-        return unknownCommand;
+    private String getChatTitle(Long chatId) {
+        String chatTitle = "";
+        try {
+            Chat chat = execute(new GetChat(String.valueOf(chatId)));
+            chatTitle = chat.getTitle();
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при получении названия чата: ", e);
+        }
+        return chatTitle;
     }
 
-    public String getError() {
-        return error;
+    @EventListener
+    public void handleSendMessageEvent(SendMessageEvent event) {
+        SendMessage message = event.getSendMessage();
+        try {
+            execute(message);
+            log.info("Сообщение отправлено в чат " + message.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при отправке сообщения: " + e.getMessage());
+        }
     }
 
-    public String getWelcomeTextButton() {
-        return welcomeTextButton;
+    @EventListener
+    public void handleSendCaptchaMessageEvent(SendCaptchaMessageEvent event) {
+        SendMessage message = event.getSendMessage();
+        try {
+            Message sentMessage = execute(message);
+            log.info("Сообщение-каптча отправлено в чат {}", message.getChatId());
+
+            event.setMessageId(sentMessage.getMessageId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при отправке сообщения-каптчи: {}", e.getMessage());
+        }
     }
 
-    public String getRecurrentTextButton() {
-        return recurrentTextButton;
+    @EventListener
+    public void handleEditMessageTextEvent(EditMessageTextEvent event) {
+        EditMessageText editMessageText = event.getEditMessageText();
+        try {
+            execute(editMessageText);
+            log.info("Сообщение отредактировано в чате " + editMessageText.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при редактировании сообщения: " + e.getMessage());
+        }
     }
 
-    public String getHelpText() {
-        return helpText;
+    @EventListener
+    public void handleBanChatMemberEvent(BanChatMemberEvent event) {
+        BanChatMember banChatMember = event.getBanChatMember();
+        try {
+            execute(banChatMember);
+            log.info("Пользователь забанен в чате " + banChatMember.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при бане пользователя: " + e.getMessage());
+        }
+    }
+
+    @EventListener
+    public void handleRestrictChatMemberEvent(RestrictChatMemberEvent event) {
+        RestrictChatMember restrictChatMember = event.getRestrictChatMember();
+        try {
+            execute(restrictChatMember);
+            log.info("Пользователь обеззвучен в чате " + restrictChatMember.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при обеззвучивании пользователя: " + e.getMessage());
+        }
+    }
+
+    @EventListener
+    public void handleDeleteMessageEvent(DeleteMessageEvent event) {
+        DeleteMessage deleteMessage = event.getDeleteMessage();
+        try {
+            execute(deleteMessage);
+            log.info("Сообщение ID " + deleteMessage.getMessageId() + " удалено из чата " + deleteMessage.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при удалении сообщения: " + e.getMessage());
+        }
+    }
+
+    @EventListener
+    public void handleForwardMessageEvent(ForwardMessageEvent event) {
+        ForwardMessage forwardMessage = event.getForwardMessage();
+        try {
+            execute(forwardMessage);
+            log.info("Сообщение переслано в чат " + forwardMessage.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при пересылке сообщения: " + e.getMessage());
+        }
+    }
+
+    @EventListener
+    public void handleSendAnimationEvent(SendAnimationEvent event) {
+        SendAnimation sendAnimation = event.getSendAnimation();
+        try {
+            execute(sendAnimation);
+            log.info("GIF отправлен в чат " + sendAnimation.getChatId());
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при отправке GIF: " + e.getMessage());
+        }
+    }
+
+    @EventListener
+    public void handleGetChatAdministratorsEvent(GetChatAdministratorsEvent event) {
+        GetChatAdministrators getChatAdministrators = event.getGetChatAdministrators();
+        CompletableFuture<List<ChatMember>> future = event.getFuture();
+        try {
+            List<ChatMember> administrators = execute(getChatAdministrators);
+            log.info("Администраторы чата " + getChatAdministrators.getChatId() + ": " + administrators.size());
+            future.complete(administrators);
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при получении администраторов чата: " + e.getMessage());
+            future.completeExceptionally(e);
+        }
     }
 
     @Override

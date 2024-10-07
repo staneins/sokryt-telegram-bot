@@ -1,12 +1,14 @@
 package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
+import com.kaminsky.finals.BotFinalVariables;
+import com.kaminsky.model.ChatInfo;
 import com.kaminsky.model.User;
+import com.kaminsky.model.repositories.ChatInfoRepository;
 import com.kaminsky.model.repositories.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import org.telegram.telegrambots.bots.TelegramLongPollingBot;
+import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -15,39 +17,40 @@ import org.telegram.telegrambots.meta.api.objects.ChatPermissions;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
-import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
-@Component
+@Service
 public class AdminService {
 
     private final UserRepository userRepository;
     private final MessageService messageService;
     private final ChatAdminService chatAdminService;
-    private final TelegramBot telegramBot;
     private final UserService userService;
     private final SchedulerService schedulerService;
     private final BotConfig botConfig;
+    private final ChatInfoRepository chatInfoRepository;
 
     @Autowired
     public AdminService(UserRepository userRepository,
                         MessageService messageService,
                         ChatAdminService chatAdminService,
-                        TelegramBot telegramBot,
-                        UserService userService, SchedulerService schedulerService, BotConfig botConfig) {
+                        UserService userService,
+                        SchedulerService schedulerService,
+                        BotConfig botConfig, ChatInfoRepository chatInfoRepository) {
         this.userRepository = userRepository;
         this.messageService = messageService;
         this.chatAdminService = chatAdminService;
-        this.telegramBot = telegramBot;
         this.userService = userService;
         this.schedulerService = schedulerService;
         this.botConfig = botConfig;
+        this.chatInfoRepository = chatInfoRepository;
     }
 
     public void handleAdminCommand(Long chatId, Long commandSenderId, String command, Message message) {
@@ -79,13 +82,13 @@ public class AdminService {
                 wipeAllMessages(chatId);
                 break;
             default:
-                messageService.sendMessage(chatId, "Неизвестная административная команда.");
+                messageService.sendMessage(chatId, BotFinalVariables.UNKNOWN_COMMAND);
                 break;
         }
     }
 
     public void handleConfigCommand(Long chatId, Message message) {
-        configCommandReceived(chatId, message.getChat().getId(), telegramBot.getBotId());
+        configCommandReceived(chatId, message.getChat().getId(), botConfig.getBotId());
     }
 
     public void handleSetWelcomeText(CallbackQuery callbackQuery) {
@@ -123,7 +126,7 @@ public class AdminService {
                 menuChatIds.add(key);
             }
         }
-        if (menuChatIds.size() > 0) {
+        if (!menuChatIds.isEmpty()) {
             SendMessage message = new SendMessage();
             message.setChatId(chatId);
             message.setText("Какой чат вы хотите настроить?");
@@ -133,14 +136,18 @@ public class AdminService {
                 InlineKeyboardButton button = new InlineKeyboardButton();
 
                 button.setCallbackData(menuChatId.toString());
-                button.setText(messageService.getChatTitle(menuChatId));
+                Optional<ChatInfo> chatInfo = chatInfoRepository.findById(menuChatId);
+
+                if(!chatInfo.isEmpty()) {
+                    button.setText(chatInfo.get().getChatTitle());
+                }
 
                 rowInLine.add(button);
                 rows.add(rowInLine);
                 markup.setKeyboard(rows);
                 message.setReplyMarkup(markup);
             }
-            messageService.sendMessage(message);
+            messageService.executeMessage(message);
         }
     }
 
@@ -169,33 +176,7 @@ public class AdminService {
     }
 
     public void handleConfigCallbackQuery(CallbackQuery callbackQuery) {
-        log.info("Получен callbackQuery с данными: " + callbackQuery.getData());
-        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        String callbackData = callbackQuery.getData();
-        Long chatId = callbackQuery.getMessage().getChatId();
-        SendMessage message = new SendMessage();
-        message.setChatId(chatId);
-        message.setText("Что вы хотите настроить?");
-        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
-        InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
-        InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
-        welcomeTextButton.setCallbackData("WELCOME_TEXT_BUTTON" + ":" + callbackData);
-        welcomeTextButton.setText("Приветственное сообщение");
-        recurrentTextButton.setText("Повторяющееся сообщение");
-        recurrentTextButton.setCallbackData("RECURRENT_TEXT_BUTTON" + ":" + callbackData);
-
-        rowInLine.add(welcomeTextButton);
-        rowInLine.add(recurrentTextButton);
-        rows.add(rowInLine);
-        markup.setKeyboard(rows);
-        message.setReplyMarkup(markup);
-
-        try {
-            telegramBot.execute(message);
-        } catch (TelegramApiException e) {
-            log.error(telegramBot.getError() + e.getMessage());
-        }
+        messageService.sendConfigOptions(callbackQuery.getMessage().getChatId());
     }
 
     public void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname, Message message) {
@@ -212,10 +193,10 @@ public class AdminService {
                 messageService.sendHTMLMessage(chatId, text, message.getMessageId());
 
                userService.addBannedUser(bannedUserId);
-                cleanUpAndShutDown(1, TimeUnit.MINUTES);
+                schedulerService.cleanUpAndShutDown(1, TimeUnit.MINUTES);
             }
         } else {
-            messageService.sendMessage(chatId, telegramBot.getNotAnAdminError());
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }
     }
 
@@ -232,13 +213,13 @@ public class AdminService {
                             "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3";
 
                     messageService.sendHTMLMessage(chatId, text, message.getMessageId());
-                    log.info("Пользователь " + warnedUserNickname + " предупрежден. Количество предупреждений: 1 из 3");
+                    log.info("Пользователь {} предупрежден. Количество предупреждений: 1 из 3", warnedUserNickname);
                 } else if (warnsCount == 2) {
                     warnedUser.setNumberOfWarns((byte) 0);
                     userRepository.save(warnedUser);
 
                     banUser(chatId, commandSenderId, warnedUserId, warnedUserNickname, message);
-                    log.info("Пользователь " + warnedUserNickname + " получил 3-е предупреждение и был забанен.");
+                    log.info("Пользователь {} получил 3-е предупреждение и был забанен.", warnedUserNickname);
                 } else {
                     warnedUser.setNumberOfWarns((byte) (warnedUser.getNumberOfWarns() + 1));
                     userRepository.save(warnedUser);
@@ -247,13 +228,13 @@ public class AdminService {
                             "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3";
 
                     messageService.sendHTMLMessage(chatId, text, message.getMessageId());
-                    log.info("Пользователь " + warnedUserNickname + " предупрежден. Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3");
+                    log.info("Пользователь {} предупрежден. Количество предупреждений: {} из 3", warnedUserNickname, warnedUser.getNumberOfWarns());
                 }
             } else {
-                messageService.sendMessage(chatId, telegramBot.getError());
+                messageService.sendMessage(chatId, BotFinalVariables.ERROR);
             }
         } else {
-            messageService.sendMessage(chatId, telegramBot.getNotAnAdminError());
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }
     }
 
@@ -269,10 +250,10 @@ public class AdminService {
                 String text = "Пользователь <a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> " +
                         "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3";
                 messageService.sendHTMLMessage(chatId, text, message.getMessageId());
-                log.info("Проверка предупреждений для пользователя " + warnedUserNickname + ": " + warnedUser.getNumberOfWarns() + " из 3");
+                log.info("Проверка предупреждений для пользователя {}: {} из 3", warnedUserNickname, warnedUser.getNumberOfWarns());
             }
         } else {
-            messageService.sendMessage(chatId, telegramBot.getNotAnAdminError());
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }
     }
 
@@ -287,10 +268,10 @@ public class AdminService {
                         "Пользователь <a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a>\n" +
                         "Количество предупреждений: " + warnedUser.getNumberOfWarns() + " из 3";
                 messageService.sendHTMLMessage(chatId, text, message.getMessageId());
-                log.info("Предупреждения пользователя " + warnedUserNickname + " сброшены.");
+                log.info("Предупреждения пользователя {} сброшены.", warnedUserNickname);
             }
         } else {
-            messageService.sendMessage(chatId, telegramBot.getNotAnAdminError());
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }
     }
 
@@ -298,24 +279,20 @@ public class AdminService {
         if (chatAdminService.isAdmin(chatId, message.getFrom().getId())) {
             User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
             if (warnedUser != null) {
-                try {
-                    Duration muteDuration = Duration.ofDays(1);
-                    RestrictChatMember restrictChatMember = new RestrictChatMember();
-                    restrictChatMember.setChatId(chatId.toString());
-                    restrictChatMember.setUserId(warnedUserId);
-                    restrictChatMember.setPermissions(new ChatPermissions());
-                    restrictChatMember.forTimePeriodDuration(muteDuration);
-                    telegramBot.execute(restrictChatMember);
+                Duration muteDuration = Duration.ofDays(1);
+                RestrictChatMember restrictChatMember = new RestrictChatMember();
+                restrictChatMember.setChatId(chatId.toString());
+                restrictChatMember.setUserId(warnedUserId);
+                restrictChatMember.setPermissions(new ChatPermissions());
+                restrictChatMember.forTimePeriodDuration(muteDuration);
+                messageService.executeRestrictChatMember(restrictChatMember);
 
-                    String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
-                    messageService.sendHTMLMessage(chatId, text, message.getMessageId());
-                    log.info("Пользователь " + warnedUserNickname + " обеззвучен на сутки.");
-                } catch (TelegramApiException e) {
-                    log.error("Ошибка при обеззвучивании пользователя: " + e.getMessage());
-                }
+                String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
+                messageService.sendHTMLMessage(chatId, text, message.getMessageId());
+                log.info("Пользователь {} обеззвучен на сутки.", warnedUserNickname);
             }
         } else {
-            messageService.sendMessage(chatId, telegramBot.getNotAnAdminError());
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }
     }
 
@@ -323,24 +300,20 @@ public class AdminService {
         if (isAdmin) {
             User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
             if (warnedUser != null) {
-                try {
-                    Duration muteDuration = Duration.ofDays(1);
-                    RestrictChatMember restrictChatMember = new RestrictChatMember();
-                    restrictChatMember.setChatId(chatId.toString());
-                    restrictChatMember.setUserId(warnedUserId);
-                    restrictChatMember.setPermissions(new ChatPermissions());
-                    restrictChatMember.forTimePeriodDuration(muteDuration);
-                    telegramBot.execute(restrictChatMember);
+                Duration muteDuration = Duration.ofDays(1);
+                RestrictChatMember restrictChatMember = new RestrictChatMember();
+                restrictChatMember.setChatId(chatId.toString());
+                restrictChatMember.setUserId(warnedUserId);
+                restrictChatMember.setPermissions(new ChatPermissions());
+                restrictChatMember.forTimePeriodDuration(muteDuration);
+                messageService.executeRestrictChatMember(restrictChatMember);
 
-                    String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
-                    messageService.sendHTMLMessage(chatId, text, message.getMessageId());
-                    log.info("Пользователь " + warnedUserNickname + " обеззвучен на сутки.");
-                } catch (TelegramApiException e) {
-                    log.error("Ошибка при обеззвучивании пользователя: " + e.getMessage());
-                }
+                String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
+                messageService.sendHTMLMessage(chatId, text, message.getMessageId());
+                log.info("Пользователь {} обеззвучен на сутки.", warnedUserNickname);
             }
         } else {
-            messageService.sendMessage(chatId, telegramBot.getNotAnAdminError());
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }
     }
 
@@ -351,25 +324,14 @@ public class AdminService {
             for (Map.Entry<Long, List<Message>> entry : userMessages.entrySet()) {
                 List<Message> messages = entry.getValue();
                 for (Message message : messages) {
-                    try {
-                        telegramBot.execute(new org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage(
-                                String.valueOf(chatId), message.getMessageId()));
-                    } catch (TelegramApiException e) {
-                        log.error("Ошибка при удалении сообщения: {}", e.getMessage());
-                    }
+                    messageService.executeDeleteMessage(new org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage(
+                            String.valueOf(chatId), message.getMessageId()));
                 }
             }
             messageService.clearUserMessages();
             messageService.sendMessage(chatId, "Все сообщения успешно удалены");
         } else {
             messageService.sendMessage(chatId, "Нет сообщений для удаления");
-        }
-    }
-
-    public void cleanUpAndShutDown(long interval, TimeUnit unit) {
-        schedulerService.startBannedUsersCleanupTask(interval, unit);
-        if (userService.getBannedUsers().isEmpty()) {
-            schedulerService.shutdownScheduler();
         }
     }
 }
