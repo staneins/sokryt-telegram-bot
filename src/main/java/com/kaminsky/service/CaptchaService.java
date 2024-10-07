@@ -122,7 +122,7 @@ public class CaptchaService {
                     .map(BotMessage::getWelcomeMessage)
                     .orElse("");
 
-            String text = "Добро пожаловать, " + userLink + "\n" + messageService.fixMarkdownText(welcomeMessage);
+            String text = "Добро пожаловать, " + userLink + "\n" + welcomeMessage;
 
             EditMessageText editMessage = new EditMessageText();
             editMessage.setChatId(chatId.toString());
@@ -160,6 +160,6 @@ public class CaptchaService {
                 messageService.deleteUserMessages(chatId, userId);
 
             }
-        }, 3, TimeUnit.MINUTES);
+        }, 10, TimeUnit.SECONDS);
     }
 }

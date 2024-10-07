@@ -36,11 +36,13 @@ public class CommandHandler {
     }
 
     public void handleMessage(Message message) {
-        String messageText = message.getText().trim();
-        if (messageText.startsWith("/")) {
-            handleCommand(message);
-        } else {
-            handleNonCommandMessage(message);
+        if (message.hasText()) {
+            String messageText = message.getText().trim();
+            if (messageText.startsWith("/")) {
+                handleCommand(message);
+            } else {
+                handleNonCommandMessage(message);
+            }
         }
     }
 
@@ -53,7 +55,7 @@ public class CommandHandler {
             if (messageText.length() > 6) {
                 String textToSend = messageText.substring(6).trim();
                 userService.sendToAllUsers(textToSend);
-                messageService.sendMessage(chatId, "Сообщение отправлено всем пользователям.");
+                messageService.sendMessage(chatId, "Сообщение отправлено всем пользователям");
             } else {
                 messageService.sendMessage(chatId, "Пожалуйста, укажите текст сообщения после команды /send");
             }
@@ -66,7 +68,7 @@ public class CommandHandler {
                 messageService.startCommandReceived(chatId, message.getChat().getFirstName());
                 break;
             case "/help":
-                messageService.sendMarkdownMessage(chatId, BotFinalVariables.HELP_TEXT);
+                messageService.sendMessage(chatId, BotFinalVariables.HELP_TEXT);
                 break;
             case "/config":
                 adminService.handleConfigCommand(chatId, message);
@@ -136,6 +138,16 @@ public class CommandHandler {
         }
     }
 
+    public void sayFarewellToUser(Message message) {
+        org.telegram.telegrambots.meta.api.objects.User leftUser = message.getLeftChatMember();
+        long chatId = message.getChatId();
+
+        String userFirstName = leftUser.getFirstName();
+        String userLink = "<a href=\"tg://user?id=" + leftUser.getId() + "\">" + userFirstName + "</a>";
+        String farewellMessage = "Всего хорошего, " + userLink;
+
+        messageService.sendHTMLMessage(chatId, farewellMessage, message.getMessageId());
+    }
 
     public void handleIncomingWelcomeTextSettingMessage(Message message) {
         Long chatId = message.getChatId();

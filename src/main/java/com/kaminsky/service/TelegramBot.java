@@ -7,7 +7,6 @@ import com.kaminsky.model.repositories.ChatInfoRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
@@ -40,6 +39,7 @@ public class TelegramBot extends TelegramLongPollingBot {
     private final BotConfig config;
     private final CaptchaService captchaService;
     private final ChatInfoRepository chatInfoRepository;
+    private final UserService userService;
 
     @Autowired
     public TelegramBot(BotConfig config,
@@ -47,13 +47,14 @@ public class TelegramBot extends TelegramLongPollingBot {
                        CallbackQueryHandler callbackQueryHandler,
                        ChatAdminService chatAdminService,
                        CaptchaService captchaService,
-                       ChatInfoRepository chatInfoRepository) {
+                       ChatInfoRepository chatInfoRepository, UserService userService) {
         this.config = config;
         this.commandHandler = commandHandler;
         this.callbackQueryHandler = callbackQueryHandler;
         this.chatAdminService = chatAdminService;
         this.captchaService = captchaService;
         this.chatInfoRepository = chatInfoRepository;
+        this.userService = userService;
         initializeCommands();
 
     }
@@ -97,6 +98,10 @@ public class TelegramBot extends TelegramLongPollingBot {
         }
 
         if (update.hasMessage()) {
+            Message message = update.getMessage();
+            if (message.getLeftChatMember() != null && !userService.getBannedUsers().contains(message.getLeftChatMember().getId())) {
+                commandHandler.sayFarewellToUser(message);
+            }
             long chatId = update.getMessage().getChatId();
             if (update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat()) {
                 chatAdminService.registerAdministrators(chatId);

@@ -5,7 +5,6 @@ import com.kaminsky.model.repositories.BotMessageRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.Executors;
@@ -36,7 +35,7 @@ public class SchedulerService {
             Long chatId = botMessage.getChatId();
             String recurrentMessage = botMessage.getRecurrentMessage();
             if (recurrentMessage != null && !recurrentMessage.trim().isEmpty()) {
-                String fixedMessage = messageService.fixMarkdownText(recurrentMessage);
+                String fixedMessage = recurrentMessage;
                 messageService.sendMarkdownMessage(chatId, fixedMessage);
                 log.info("Повторяющееся сообщение отправлено {}: {}", chatId, recurrentMessage);
             }

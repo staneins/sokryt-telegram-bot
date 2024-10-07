@@ -113,6 +113,7 @@ public class AdminService {
 
         messageService.sendMessage(targetChatId, helpMessageText);
         userService.setAwaitingWelcomeText(true);
+        userService.setCurrentChatIdForWelcomeText(targetChatId);
     }
 
     public void configCommandReceived(Long chatId, Long userId, Long botId) {
@@ -173,6 +174,7 @@ public class AdminService {
 
         messageService.sendMessage(targetChatId, helpMessageText);
         userService.setAwaitingRecurrentText(true);
+        userService.setCurrentChatIdForRecurrentText(targetChatId);
     }
 
     public void handleConfigCallbackQuery(CallbackQuery callbackQuery) {

@@ -165,7 +165,7 @@ public class MessageService {
     public void sendMarkdownMessage(Long chatId, String textToSend) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId.toString());
-        message.setText(fixMarkdownText(textToSend));
+        message.setText(textToSend);
         message.setParseMode("MarkdownV2");
         eventPublisher.publishEvent(new SendMessageEvent(message));
         log.info("Публикация события SendMessageEvent (MarkdownV2) для чата " + chatId);
@@ -174,32 +174,11 @@ public class MessageService {
     public void sendMarkdownMessage(Long chatId, String textToSend, Integer replyToMessageId) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId.toString());
-        message.setText(fixMarkdownText(textToSend));
+        message.setText(textToSend);
         message.setReplyToMessageId(replyToMessageId);
         message.setParseMode("MarkdownV2");
         eventPublisher.publishEvent(new SendMessageEvent(message));
         log.info("Публикация события SendMessageEvent (MarkdownV2) с ответом на сообщение для чата " + chatId);
-    }
-    public String fixMarkdownText(String text) {
-        return text
-                .replace("_", "\\_")
-                .replace("*", "\\*")
-                .replace("[", "\\[")
-                .replace("]", "\\]")
-                .replace("(", "\\(")
-                .replace(")", "\\)")
-                .replace("~", "\\~")
-                .replace("`", "\\`")
-                .replace(">", "\\>")
-                .replace("#", "\\#")
-                .replace("+", "\\+")
-                .replace("-", "\\-")
-                .replace("=", "\\=")
-                .replace("|", "\\|")
-                .replace("{", "\\{")
-                .replace("}", "\\}")
-                .replace(".", "\\.")
-                .replace("!", "\\!");
     }
 
     public List<ChatMember> executeGetChatAdministrators(GetChatAdministrators getChatAdministrators) {

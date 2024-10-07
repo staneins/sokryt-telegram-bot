@@ -82,17 +82,17 @@ public class UserService {
     }
 
     public void saveWelcomeText(Long chatId, String welcomeText) {
-        BotMessage botMessage = botMessageRepository.findById(chatId).orElse(new BotMessage());
-        botMessage.setChatId(chatId);
-        botMessage.setWelcomeMessage(welcomeText);
-        botMessageRepository.save(botMessage);
+            BotMessage botMessage = botMessageRepository.findById(chatId).orElse(new BotMessage());
+            botMessage.setChatId(chatId);
+            botMessage.setWelcomeMessage(welcomeText);
+            botMessageRepository.save(botMessage);
     }
 
     public void saveRecurrentText(Long chatId, String recurrentText) {
-        BotMessage botMessage = botMessageRepository.findById(chatId).orElse(new BotMessage());
-        botMessage.setChatId(chatId);
-        botMessage.setRecurrentMessage(recurrentText);
-        botMessageRepository.save(botMessage);
+            BotMessage botMessage = botMessageRepository.findById(chatId).orElse(new BotMessage());
+            botMessage.setChatId(chatId);
+            botMessage.setRecurrentMessage(recurrentText);
+            botMessageRepository.save(botMessage);
     }
 
     public void forwardUnbanPetition(Long chatId, Message message) {
