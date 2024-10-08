@@ -75,6 +75,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         List<BotCommand> adminChatCommands = new ArrayList<>();
         adminChatCommands.add(new BotCommand("/ban", "Забанить пользователя"));
         adminChatCommands.add(new BotCommand("/mute", "Замутить пользователя"));
+        adminChatCommands.add(new BotCommand("/unmute", "Снять ограничения"));
         adminChatCommands.add(new BotCommand("/warn", "Предупредить пользователя"));
         adminChatCommands.add(new BotCommand("/check", "посмотреть количество предупреждений"));
         adminChatCommands.add(new BotCommand("/reset", "сбросить предупреждения"));
@@ -99,13 +100,14 @@ public class TelegramBot extends TelegramLongPollingBot {
 
         if (update.hasMessage()) {
             Message message = update.getMessage();
+            userService.collectUserMessage(message.getFrom().getId(), message);
             if (message.getLeftChatMember() != null && !userService.getBannedUsers().contains(message.getLeftChatMember().getId())) {
                 commandHandler.sayFarewellToUser(message);
             }
             long chatId = update.getMessage().getChatId();
             if (update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat()) {
                 chatAdminService.registerAdministrators(chatId);
-                registerChatInfo(chatId);
+                registerChatInfo(update);
             }
             commandHandler.handleMessage(update.getMessage());
         }
@@ -125,24 +127,17 @@ public class TelegramBot extends TelegramLongPollingBot {
         return false;
     }
 
-    private void registerChatInfo(Long chatId) {
-        if (!chatInfoRepository.existsById(chatId)) {
-            ChatInfo chatInfo = new ChatInfo();
-            chatInfo.setChatTitle(getChatTitle(chatId));
-            chatInfo.setChatId(chatId);
-            chatInfoRepository.save(chatInfo);
-        }
-    }
+    private void registerChatInfo(Update update) {
+        if (update.getMessage().getChat().getTitle() != null) {
+            Long chatId = update.getMessage().getChatId();
+            String chatTitle = update.getMessage().getChat().getTitle();
 
-    private String getChatTitle(Long chatId) {
-        String chatTitle = "";
-        try {
-            Chat chat = execute(new GetChat(String.valueOf(chatId)));
-            chatTitle = chat.getTitle();
-        } catch (TelegramApiException e) {
-            log.error("Ошибка при получении названия чата: ", e);
+                ChatInfo chatInfo = new ChatInfo();
+                chatInfo.setChatTitle(chatTitle);
+                chatInfo.setChatId(chatId);
+                chatInfoRepository.save(chatInfo);
+
         }
-        return chatTitle;
     }
 
     @EventListener

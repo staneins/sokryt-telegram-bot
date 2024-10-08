@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.ChatPermissions;
 import org.telegram.telegrambots.meta.api.objects.Message;
@@ -55,7 +56,7 @@ public class AdminService {
 
     public void handleAdminCommand(Long chatId, Long commandSenderId, String command, Message message) {
         if (!chatAdminService.isAdmin(chatId, commandSenderId)) {
-            messageService.sendMessage(chatId, "Для этого нужны права администратора.");
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR, message.getMessageId());
             return;
         }
 
@@ -63,22 +64,25 @@ public class AdminService {
         String objectName = message.getReplyToMessage().getFrom().getFirstName();
 
         switch (command) {
-            case "/ban":
+            case "/ban@sokrytbot":
                 banUser(chatId, commandSenderId, objectId, objectName, message);
                 break;
-            case "/mute":
+            case "/mute@sokrytbot":
                 muteUser(chatId, objectId, objectName, message);
                 break;
-            case "/warn":
+            case "/unmute@sokrytbot":
+                unmuteUser(chatId, objectId, objectName, message);
+                break;
+            case "/warn@sokrytbot":
                 warnUser(chatId, commandSenderId, objectId, objectName, message);
                 break;
-            case "/check":
+            case "/check@sokrytbot":
                 checkWarns(chatId, objectId, objectName, message);
                 break;
-            case "/reset":
+            case "/reset@sokrytbot":
                 resetWarns(chatId, objectId, objectName, message);
                 break;
-            case "/wipe":
+            case "/wipe@sokrytbot":
                 wipeAllMessages(chatId);
                 break;
             default:
@@ -94,8 +98,9 @@ public class AdminService {
     public void handleSetWelcomeText(CallbackQuery callbackQuery) {
         String callbackData = callbackQuery.getData();
         Long targetChatId = Long.parseLong(callbackData.split(":")[1]);
+        Long chatId = callbackQuery.getMessage().getChatId();
 
-        String helpMessageText = "Пришлите приветственное сообщение. Примеры:\n" +
+        String helpMessageText = "Пришлите приветственное сообщение. Примеры:\n\n" +
                 "Чтобы сделать текст жирным, используйте двойные звездочки (**):\n" +
                 "**Этот текст будет жирным**\n\n" +
                 "Чтобы сделать текст курсивным, используйте одинарные подчеркивания (_):\n" +
@@ -111,9 +116,11 @@ public class AdminService {
                 "Чтобы подчеркнуть текст, используйте двойные подчеркивания:\n" +
                 "__Этот текст будет подчеркнут__";
 
-        messageService.sendMessage(targetChatId, helpMessageText);
+        messageService.sendMessage(chatId, helpMessageText);
         userService.setAwaitingWelcomeText(true);
         userService.setCurrentChatIdForWelcomeText(targetChatId);
+        messageService.executeDeleteMessage(new DeleteMessage(
+                String.valueOf(chatId), callbackQuery.getMessage().getMessageId()));
     }
 
     public void configCommandReceived(Long chatId, Long userId, Long botId) {
@@ -155,6 +162,7 @@ public class AdminService {
     public void handleSetRecurrentText(CallbackQuery callbackQuery) {
         String callbackData = callbackQuery.getData();
         Long targetChatId = Long.parseLong(callbackData.split(":")[1]);
+        Long chatId = callbackQuery.getMessage().getChatId();
 
         String helpMessageText = "Пришлите повторяющееся сообщение. Примеры:\n\n" +
                 "Чтобы сделать текст жирным, используйте двойные звездочки (**):\n" +
@@ -172,13 +180,14 @@ public class AdminService {
                 "Чтобы подчеркнуть текст, используйте двойные подчеркивания:\n" +
                 "__Этот текст будет подчеркнут__";
 
-        messageService.sendMessage(targetChatId, helpMessageText);
+        messageService.sendMarkdownMessage(chatId, helpMessageText);
         userService.setAwaitingRecurrentText(true);
         userService.setCurrentChatIdForRecurrentText(targetChatId);
     }
 
     public void handleConfigCallbackQuery(CallbackQuery callbackQuery) {
-        messageService.sendConfigOptions(callbackQuery.getMessage().getChatId());
+        Long targetChatId = Long.parseLong(callbackQuery.getData());
+        messageService.sendConfigOptions(callbackQuery.getMessage().getChatId(), targetChatId, callbackQuery.getMessage().getMessageId());
     }
 
     public void banUser(Long chatId, Long commandSenderId, Long bannedUserId, String bannedUserNickname, Message message) {
@@ -194,8 +203,8 @@ public class AdminService {
                 String text = "<a href=\"tg://user?id=" + bannedUserId + "\">" + bannedUserNickname + "</a> уничтожен";
                 messageService.sendHTMLMessage(chatId, text, message.getMessageId());
 
-               userService.addBannedUser(bannedUserId);
-                schedulerService.cleanUpAndShutDown(1, TimeUnit.MINUTES);
+                userService.addBannedUser(bannedUserId);
+                schedulerService.startBannedUsersCleanupTask(1, TimeUnit.MINUTES);
             }
         } else {
             messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
@@ -277,6 +286,15 @@ public class AdminService {
         }
     }
 
+    public void handleUnmuteCommandCallbackQuery(CallbackQuery callbackQuery) {
+        String callbackData = callbackQuery.getData();
+        Long chatId = Long.parseLong(callbackData.split(":")[1]);
+        Long userId = Long.parseLong(callbackData.split(":")[2]);
+        String userNickname = callbackData.split(":")[3];
+
+        unmuteUser(chatId, userId, userNickname, callbackQuery.getMessage(), true);
+    }
+
     public void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
         if (chatAdminService.isAdmin(chatId, message.getFrom().getId())) {
             User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
@@ -290,11 +308,24 @@ public class AdminService {
                 messageService.executeRestrictChatMember(restrictChatMember);
 
                 String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
-                messageService.sendHTMLMessage(chatId, text, message.getMessageId());
+
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+                List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+
+                InlineKeyboardButton unmuteButton = new InlineKeyboardButton();
+                unmuteButton.setCallbackData(BotFinalVariables.UNMUTE_BUTTON + ":" + chatId + ":" + warnedUserId + ":" + warnedUserNickname);
+                unmuteButton.setText("Снять ограничения");
+
+                rowInLine.add(unmuteButton);
+                rows.add(rowInLine);
+                markup.setKeyboard(rows);
+
+                messageService.sendHTMLMessageWithKeyboard(chatId, text, markup, message.getMessageId());
                 log.info("Пользователь {} обеззвучен на сутки.", warnedUserNickname);
             }
         } else {
-            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR, message.getMessageId());
         }
     }
 
@@ -311,11 +342,78 @@ public class AdminService {
                 messageService.executeRestrictChatMember(restrictChatMember);
 
                 String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
-                messageService.sendHTMLMessage(chatId, text, message.getMessageId());
+
+                InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+                List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+
+                InlineKeyboardButton unmuteButton = new InlineKeyboardButton();
+                unmuteButton.setCallbackData(BotFinalVariables.UNMUTE_BUTTON + ":" + chatId + ":" + warnedUserId + ":" + warnedUserNickname);
+                unmuteButton.setText("Снять ограничения");
+
+                rowInLine.add(unmuteButton);
+                rows.add(rowInLine);
+                markup.setKeyboard(rows);
+
+                messageService.sendHTMLMessageWithKeyboard(chatId, text, markup, message.getMessageId());
                 log.info("Пользователь {} обеззвучен на сутки.", warnedUserNickname);
             }
         } else {
             messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
+        }
+    }
+
+    public void unmuteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
+        if (chatAdminService.isAdmin(chatId, message.getFrom().getId())) {
+            ChatPermissions permissions = new ChatPermissions();
+            permissions.setCanSendMessages(true);
+            permissions.setCanSendMediaMessages(true);
+            permissions.setCanSendPolls(true);
+            permissions.setCanSendOtherMessages(true);
+            permissions.setCanAddWebPagePreviews(true);
+            permissions.setCanChangeInfo(true);
+            permissions.setCanInviteUsers(true);
+
+            RestrictChatMember restrictChatMember = new RestrictChatMember();
+            restrictChatMember.setChatId(chatId);
+            restrictChatMember.setUserId(warnedUserId);
+            restrictChatMember.setPermissions(permissions);
+
+            messageService.executeRestrictChatMember(restrictChatMember);
+            messageService.sendHTMLMessage(chatId, "Все ограничения сняты с пользователя " + "<a href=\"tg://user?id=" +
+                    warnedUserId + "\">" + warnedUserNickname + "</a>");
+
+            messageService.executeDeleteMessage(new DeleteMessage(
+                    String.valueOf(chatId), message.getMessageId()));
+        } else {
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR, message.getMessageId());
+        }
+    }
+
+    public void unmuteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message, Boolean isAdmin) {
+        if (isAdmin) {
+            ChatPermissions permissions = new ChatPermissions();
+            permissions.setCanSendMessages(true);
+            permissions.setCanSendMediaMessages(true);
+            permissions.setCanSendPolls(true);
+            permissions.setCanSendOtherMessages(true);
+            permissions.setCanAddWebPagePreviews(true);
+            permissions.setCanChangeInfo(true);
+            permissions.setCanInviteUsers(true);
+
+            RestrictChatMember restrictChatMember = new RestrictChatMember();
+            restrictChatMember.setChatId(chatId);
+            restrictChatMember.setUserId(warnedUserId);
+            restrictChatMember.setPermissions(permissions);
+
+            messageService.executeRestrictChatMember(restrictChatMember);
+            messageService.sendHTMLMessage(chatId, "Все ограничения сняты с пользователя " + "<a href=\"tg://user?id=" +
+                            warnedUserId + "\">" + warnedUserNickname + "</a>");
+
+            messageService.executeDeleteMessage(new DeleteMessage(
+                    String.valueOf(chatId), message.getMessageId()));
+        } else {
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR, message.getMessageId());
         }
     }
 
@@ -326,7 +424,7 @@ public class AdminService {
             for (Map.Entry<Long, List<Message>> entry : userMessages.entrySet()) {
                 List<Message> messages = entry.getValue();
                 for (Message message : messages) {
-                    messageService.executeDeleteMessage(new org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage(
+                    messageService.executeDeleteMessage(new DeleteMessage(
                             String.valueOf(chatId), message.getMessageId()));
                 }
             }

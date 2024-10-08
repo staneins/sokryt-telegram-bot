@@ -59,11 +59,4 @@ public class SchedulerService {
             userService.clearBannedUsers();
         }, interval, interval, timeUnit);
     }
-
-    public void cleanUpAndShutDown(long interval, TimeUnit unit) {
-        startBannedUsersCleanupTask(interval, unit);
-        if (userService.getBannedUsers().isEmpty()) {
-            shutdownScheduler();
-        }
     }
-}

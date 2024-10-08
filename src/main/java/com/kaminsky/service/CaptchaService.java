@@ -122,7 +122,11 @@ public class CaptchaService {
                     .map(BotMessage::getWelcomeMessage)
                     .orElse("");
 
-            String text = "Добро пожаловать, " + userLink + "\n" + welcomeMessage;
+            String basicText = "Добро пожаловать, " + userLink + "\n";
+            StringBuilder builder = new StringBuilder();
+            builder.append(basicText);
+            builder.append(messageService.fixMarkdownText(welcomeMessage));
+            String text = builder.toString();
 
             EditMessageText editMessage = new EditMessageText();
             editMessage.setChatId(chatId.toString());
@@ -141,14 +145,15 @@ public class CaptchaService {
         schedulerService.scheduleTask(() -> {
             boolean isCaptchaConfirmed = userService.getUserCaptchaStatus(userId);
             if (!isCaptchaConfirmed) {
+
                 BanChatMember kickChatMember = new BanChatMember();
-                Duration kickDuration = Duration.ofNanos(1);
+                Duration kickDuration = Duration.ofSeconds(40);
                 kickChatMember.setChatId(chatId.toString());
                 kickChatMember.setUserId(userId);
                 kickChatMember.forTimePeriodDuration(kickDuration);
-                schedulerService.cleanUpAndShutDown(1, TimeUnit.MINUTES);
 
                 messageService.executeBanChatMember(kickChatMember);
+                userService.addBannedUser(userId);
                 log.info("Пользователь {} не прошел каптчу и был кикнут", userId);
 
                 DeleteMessage deleteMessage = new DeleteMessage();
@@ -158,8 +163,8 @@ public class CaptchaService {
                 messageService.executeDeleteMessage(deleteMessage);
 
                 messageService.deleteUserMessages(chatId, userId);
-
+                schedulerService.startBannedUsersCleanupTask(1, TimeUnit.MINUTES);
             }
-        }, 10, TimeUnit.SECONDS);
+        }, 30, TimeUnit.SECONDS);
     }
 }

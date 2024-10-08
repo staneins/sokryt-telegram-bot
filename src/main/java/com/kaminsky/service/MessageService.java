@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
+import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
@@ -69,10 +70,10 @@ public class MessageService {
         message.setReplyMarkup(keyboardMarkup);
 
         executeMessage(message);
-        log.info("Поприветствовали " + name);
+        log.info("Поприветствовали {}", name);
     }
     
-    public void sendConfigOptions(Long chatId) {
+    public void sendConfigOptions(Long chatId, Long targetChatId, Integer prevMessageId) {
         SendMessage message = new SendMessage();
         message.setChatId(chatId.toString());
         message.setText("Что вы хотите настроить?");
@@ -84,10 +85,10 @@ public class MessageService {
         InlineKeyboardButton welcomeTextButton = new InlineKeyboardButton();
         InlineKeyboardButton recurrentTextButton = new InlineKeyboardButton();
 
-        welcomeTextButton.setCallbackData(BotFinalVariables.WELCOME_TEXT_BUTTON + ":" + chatId);
+        welcomeTextButton.setCallbackData(BotFinalVariables.WELCOME_TEXT_BUTTON + ":" + targetChatId);
         welcomeTextButton.setText("Приветствие");
 
-        recurrentTextButton.setCallbackData(BotFinalVariables.RECURRENT_TEXT_BUTTON + ":" + chatId);
+        recurrentTextButton.setCallbackData(BotFinalVariables.RECURRENT_TEXT_BUTTON + ":" + targetChatId);
         recurrentTextButton.setText("Автосообщение");
 
         rowInLine.add(welcomeTextButton);
@@ -98,7 +99,17 @@ public class MessageService {
         message.setReplyMarkup(markup);
 
         executeMessage(message);
-        log.info("Отправлены опции конфигурации в чат " + chatId);
+        log.info("Отправлены опции конфигурации в чат {}", chatId);
+
+        executeDeleteMessage(new DeleteMessage(
+                String.valueOf(chatId), prevMessageId));
+    }
+
+    public void sayFarewellToUser(Long chatId, Long userId, String userFirstName, Integer messageId) {
+        String userLink = "<a href=\"tg://user?id=" + userId + "\">" + userFirstName + "</a>";
+        String farewellMessage = "Всего хорошего, " + userLink;
+
+        sendHTMLMessage(chatId, farewellMessage, messageId);
     }
 
     public void executeEditMessage(EditMessageText editMessageText) {
@@ -131,7 +142,7 @@ public class MessageService {
         message.setChatId(chatId.toString());
         message.setText(textToSend);
         eventPublisher.publishEvent(new SendMessageEvent(message));
-        log.info("Публикация события SendMessageEvent для чата " + chatId);
+        log.info("Публикация события SendMessageEvent для чата {}", chatId);
     }
 
     public void sendMessage(Long chatId, String textToSend, Integer replyToMessageId) {
@@ -140,7 +151,7 @@ public class MessageService {
         message.setText(textToSend);
         message.setReplyToMessageId(replyToMessageId);
         eventPublisher.publishEvent(new SendMessageEvent(message));
-        log.info("Публикация события SendMessageEvent с ответом на сообщение для чата " + chatId);
+        log.info("Публикация события SendMessageEvent с ответом на сообщение для чата {}", chatId);
     }
 
     public void sendHTMLMessage(Long chatId, String textToSend) {
@@ -149,7 +160,7 @@ public class MessageService {
         message.setText(textToSend);
         message.setParseMode("HTML");
         eventPublisher.publishEvent(new SendMessageEvent(message));
-        log.info("Публикация события SendMessageEvent (HTML) для чата " + chatId);
+        log.info("Публикация события SendMessageEvent (HTML) для чата {}", chatId);
     }
 
     public void sendHTMLMessage(Long chatId, String textToSend, Integer replyToMessageId) {
@@ -159,8 +170,22 @@ public class MessageService {
         message.setReplyToMessageId(replyToMessageId);
         message.setParseMode("HTML");
         eventPublisher.publishEvent(new SendMessageEvent(message));
-        log.info("Публикация события SendMessageEvent (HTML) с ответом на сообщение для чата " + chatId);
+        log.info("Публикация события SendMessageEvent (HTML) с ответом на сообщение для чата {}", chatId);
     }
+
+    public void sendHTMLMessageWithKeyboard(Long chatId, String text, InlineKeyboardMarkup keyboardMarkup, Integer replyToMessageId) {
+        SendMessage message = new SendMessage();
+        message.setChatId(chatId.toString());
+        message.setText(text);
+        message.setParseMode("HTML");
+        message.setReplyToMessageId(replyToMessageId);
+        message.setReplyMarkup(keyboardMarkup);
+
+        eventPublisher.publishEvent(new SendMessageEvent(message));
+        log.info("Публикация события SendMessageEvent (HTML) с клавиатурой для чата {}", chatId);
+    }
+
+
 
     public void sendMarkdownMessage(Long chatId, String textToSend) {
         SendMessage message = new SendMessage();
@@ -168,7 +193,7 @@ public class MessageService {
         message.setText(textToSend);
         message.setParseMode("MarkdownV2");
         eventPublisher.publishEvent(new SendMessageEvent(message));
-        log.info("Публикация события SendMessageEvent (MarkdownV2) для чата " + chatId);
+        log.info("Публикация события SendMessageEvent (MarkdownV2) для чата {}", chatId);
     }
 
     public void sendMarkdownMessage(Long chatId, String textToSend, Integer replyToMessageId) {
@@ -178,7 +203,7 @@ public class MessageService {
         message.setReplyToMessageId(replyToMessageId);
         message.setParseMode("MarkdownV2");
         eventPublisher.publishEvent(new SendMessageEvent(message));
-        log.info("Публикация события SendMessageEvent (MarkdownV2) с ответом на сообщение для чата " + chatId);
+        log.info("Публикация события SendMessageEvent (MarkdownV2) с ответом на сообщение для чата {}", chatId);
     }
 
     public List<ChatMember> executeGetChatAdministrators(GetChatAdministrators getChatAdministrators) {
@@ -187,7 +212,7 @@ public class MessageService {
         try {
             return future.get();
         } catch (InterruptedException | ExecutionException e) {
-            log.error("Ошибка при получении администраторов чата: " + e.getMessage());
+            log.error("Ошибка при получении администраторов чата: {}", e.getMessage());
             return null;
         }
     }
@@ -224,13 +249,35 @@ public class MessageService {
     }
 
     public void sendRandomGif(Long chatId) {
-        String gifUrl = chooseRandomGifUrl(); // Предполагается, что метод определен
+        String gifUrl = chooseRandomGifUrl();
         SendAnimation sendAnimation = new SendAnimation();
         sendAnimation.setChatId(String.valueOf(chatId));
         sendAnimation.setAnimation(new org.telegram.telegrambots.meta.api.objects.InputFile(gifUrl));
 
         eventPublisher.publishEvent(new SendAnimationEvent(sendAnimation));
-        log.info("Публикация события SendAnimationEvent для чата " + chatId);
+        log.info("Публикация события SendAnimationEvent для чата {}", chatId);
+    }
+
+    public String fixMarkdownText(String text) {
+        return text
+                .replace("_", "\\_")
+                .replace("*", "\\*")
+                .replace("[", "\\[")
+                .replace("]", "\\]")
+                .replace("(", "\\(")
+                .replace(")", "\\)")
+                .replace("~", "\\~")
+                .replace("`", "\\`")
+                .replace(">", "\\>")
+                .replace("#", "\\#")
+                .replace("+", "\\+")
+                .replace("-", "\\-")
+                .replace("=", "\\=")
+                .replace("|", "\\|")
+                .replace("{", "\\{")
+                .replace("}", "\\}")
+                .replace(".", "\\.")
+                .replace("!", "\\!");
     }
 
     public Map<Long, List<Message>> getUserMessages() {
@@ -239,6 +286,11 @@ public class MessageService {
 
     public void clearUserMessages() {
         userMessages.clear();
+    }
+
+    public void addUserMessage(Long userId, Message message) {
+        userMessages.putIfAbsent(userId, new ArrayList<>());
+        userMessages.get(userId).add(message);
     }
 
     public void deleteUserMessages(Long chatId, Long userId) {
@@ -250,7 +302,7 @@ public class MessageService {
                     deleteMessage.setChatId(String.valueOf(chatId));
                     deleteMessage.setMessageId(message.getMessageId());
                     eventPublisher.publishEvent(new DeleteMessageEvent(deleteMessage));
-                    log.info("Публикация события DeleteMessageEvent для удаления сообщения ID " + message.getMessageId());
+                    log.info("Публикация события DeleteMessageEvent для удаления сообщения ID {}", message.getMessageId());
                 }
                 messages.clear();
             }

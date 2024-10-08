@@ -103,6 +103,10 @@ public class UserService {
         messageService.executeForwardMessage(forwardMessage);
     }
 
+    public void collectUserMessage(Long chatId, Message message) {
+        messageService.addUserMessage(chatId, message);
+    }
+
     public void setUserCaptchaStatus(Long chatId, Boolean isPassedCaptcha) {
         userCaptchaStatus.put(chatId, isPassedCaptcha);
     }

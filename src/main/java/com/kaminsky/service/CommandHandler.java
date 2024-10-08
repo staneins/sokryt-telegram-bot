@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
 import java.util.List;
@@ -50,54 +51,71 @@ public class CommandHandler {
         String messageText = message.getText().trim();
         Long chatId = message.getChatId();
         Long userId = message.getFrom().getId();
+        Boolean isGroupChat = message.getChat().isGroupChat() || message.getChat().isSuperGroupChat();
+        Boolean isPrivateChat = message.getChat().isUserChat();
 
-        if (messageText.startsWith("/send") && config.getOwnerId().equals(userId)) {
-            if (messageText.length() > 6) {
-                String textToSend = messageText.substring(6).trim();
-                userService.sendToAllUsers(textToSend);
-                messageService.sendMessage(chatId, "Сообщение отправлено всем пользователям");
-            } else {
-                messageService.sendMessage(chatId, "Пожалуйста, укажите текст сообщения после команды /send");
+        if (isPrivateChat) {
+            if (messageText.startsWith("/send") && config.getOwnerId().equals(userId)) {
+                if (messageText.length() > 6) {
+                    String textToSend = messageText.substring(6).trim();
+                    userService.sendToAllUsers(textToSend);
+                    messageService.sendMessage(chatId, "Сообщение отправлено всем пользователям");
+                } else {
+                    messageService.sendMessage(chatId, "Пожалуйста, укажите текст сообщения после команды /send");
+                }
+                return;
             }
-            return;
+
+            switch (messageText) {
+                case "/start":
+                    userService.registerUser(message);
+                    messageService.startCommandReceived(chatId, message.getChat().getFirstName());
+                    break;
+                case "/help":
+                    messageService.sendMessage(chatId, BotFinalVariables.HELP_TEXT);
+                    break;
+                case "/config":
+                    adminService.handleConfigCommand(chatId, message);
+                    break;
+                default:
+                    if (!userService.isCommandHandled()) {
+                        messageService.sendMessage(chatId, BotFinalVariables.UNKNOWN_COMMAND);
+                    } else {
+                        userService.setCommandHandled(false);
+                    }
+                    break;
+            }
         }
 
-        switch (messageText) {
-            case "/start":
-                userService.registerUser(message);
-                messageService.startCommandReceived(chatId, message.getChat().getFirstName());
-                break;
-            case "/help":
-                messageService.sendMessage(chatId, BotFinalVariables.HELP_TEXT);
-                break;
-            case "/config":
-                adminService.handleConfigCommand(chatId, message);
-                break;
-            case "/ban":
-            case "/mute":
-            case "/warn":
-            case "/check":
-            case "/reset":
-            case "/wipe":
-                adminService.handleAdminCommand(chatId, userId, messageText, message);
-                break;
-            default:
-                if (!userService.isCommandHandled()) {
-                    messageService.sendMessage(chatId, BotFinalVariables.UNKNOWN_COMMAND);
-                } else {
-                    userService.setCommandHandled(false);
-                }
-                break;
+        if (isGroupChat) {
+            switch (messageText) {
+                case "/ban@sokrytbot":
+                case "/mute@sokrytbot":
+                case "/unmute@sokrytbot":
+                case "/warn@sokrytbot":
+                case "/check@sokrytbot":
+                case "/reset@sokrytbot":
+                case "/wipe@sokrytbot":
+                    adminService.handleAdminCommand(chatId, userId, messageText, message);
+                    break;
+                default:
+                    messageService.sendMessage(chatId, BotFinalVariables.UNKNOWN_COMMAND, message.getMessageId());
+                    break;
+            }
         }
     }
+
 
     private void handleNonCommandMessage(Message message) {
         Long chatId = message.getChatId();
         String messageText = message.getText();
+        Boolean isPrivateChat = message.getChat().isUserChat();
 
         String botUsername = config.getBotName();
-        boolean isBotMentioned = messageText.contains("@" + botUsername);
-        if (isBotMentioned) {
+        Boolean isBotMentioned = messageText.contains("@" + botUsername);
+        Boolean isReplyToBot = message.isReply() &&
+                message.getReplyToMessage().getFrom().getUserName().equals(config.getBotName());
+        if (isBotMentioned || isReplyToBot) {
             messageService.sendMessage(chatId, "Чего надо?", message.getMessageId());
         }
 
@@ -105,6 +123,7 @@ public class CommandHandler {
         handleIncomingRecurrentTextSettingMessage(message);
         handleUnbanPetition(message);
 
+        if (isPrivateChat) {
         switch (messageText) {
             case "сайт проекта":
                 String projectLink = "[Сайт проекта «Сокрытая Русь»](https://sokryt.ru)";
@@ -129,6 +148,14 @@ public class CommandHandler {
                 String mapLink = "[Главный чат Общества](https://t.me/ukhtomsky_chat)";
                 messageService.sendMarkdownMessage(chatId, mapLink);
                 break;
+            default:
+                if (!userService.isCommandHandled()) {
+                    messageService.sendMessage(chatId, BotFinalVariables.UNKNOWN_COMMAND);
+                } else {
+                    userService.setCommandHandled(false);
+                }
+                break;
+        }
         }
 
         List<String> keyWords = getKeyWords();
@@ -141,13 +168,9 @@ public class CommandHandler {
     public void sayFarewellToUser(Message message) {
         org.telegram.telegrambots.meta.api.objects.User leftUser = message.getLeftChatMember();
         long chatId = message.getChatId();
-
-        String userFirstName = leftUser.getFirstName();
-        String userLink = "<a href=\"tg://user?id=" + leftUser.getId() + "\">" + userFirstName + "</a>";
-        String farewellMessage = "Всего хорошего, " + userLink;
-
-        messageService.sendHTMLMessage(chatId, farewellMessage, message.getMessageId());
+        messageService.sayFarewellToUser(chatId, leftUser.getId(), leftUser.getFirstName(), message.getMessageId());
     }
+
 
     public void handleIncomingWelcomeTextSettingMessage(Message message) {
         Long chatId = message.getChatId();

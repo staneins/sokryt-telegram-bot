@@ -1,5 +1,6 @@
 package com.kaminsky.service;
 
+import com.kaminsky.finals.BotFinalVariables;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -22,12 +23,14 @@ public class CallbackQueryHandler {
 
     public void handleCallbackQuery(CallbackQuery callbackQuery) {
         String data = callbackQuery.getData();
-        if (data.startsWith("CONFIRM_BUTTON")) {
+        if (data.startsWith(BotFinalVariables.CONFIRM_BUTTON)) {
             captchaService.handleConfirmButton(callbackQuery);
-        } else if (data.startsWith("WELCOME_TEXT_BUTTON")) {
+        } else if (data.startsWith(BotFinalVariables.WELCOME_TEXT_BUTTON)) {
             adminService.handleSetWelcomeText(callbackQuery);
-        } else if (data.startsWith("RECURRENT_TEXT_BUTTON")) {
+        } else if (data.startsWith(BotFinalVariables.RECURRENT_TEXT_BUTTON)) {
             adminService.handleSetRecurrentText(callbackQuery);
+        } else if (data.startsWith(BotFinalVariables.UNMUTE_BUTTON)) {
+            adminService.handleUnmuteCommandCallbackQuery(callbackQuery);
         } else {
             adminService.handleConfigCallbackQuery(callbackQuery);
         }
