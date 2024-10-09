@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
-import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
@@ -102,10 +101,11 @@ public class MessageService {
         message.setReplyMarkup(markup);
 
         executeMessage(message);
-        log.info("Отправлены опции конфигурации в чат {}", chatId);
 
         executeDeleteMessage(new DeleteMessage(
                 String.valueOf(chatId), prevMessageId));
+
+        log.info("Отправлены опции конфигурации в чат {}", chatId);
     }
 
     public void sayFarewellToUser(Long chatId, Long userId, String userFirstName, Integer messageId) {
@@ -239,7 +239,7 @@ public class MessageService {
     public Integer executeCaptchaMessage(SendMessage message) {
         SendCaptchaMessageEvent sendCaptchaMessageEvent = new SendCaptchaMessageEvent(message);
         eventPublisher.publishEvent(sendCaptchaMessageEvent);
-
+        log.info("Публикация события SendCaptchaMessageEvent для executeCaptchaMessage");
         return sendCaptchaMessageEvent.getMessageId();
     }
 

@@ -90,7 +90,7 @@ public class CaptchaService {
         String[] parts = callbackData.split(":");
 
         if (parts.length != 2) {
-            log.error("Неверный формат callback data: " + callbackData);
+            log.error("Неверный формат callback data: {}", callbackData);
             return;
         }
 
@@ -100,12 +100,12 @@ public class CaptchaService {
         try {
             targetUserId = Long.parseLong(parts[1]);
         } catch (NumberFormatException e) {
-            log.error("Неверный id пользователя: " + parts[1]);
+            log.error("Неверный id пользователя: {}", parts[1]);
             return;
         }
 
         if (!button.equals(BotFinalVariables.CONFIRM_BUTTON)) {
-            log.warn("Неизвестный тип кнопки: " + button);
+            log.warn("Неизвестный тип кнопки: {}", button);
             return;
         }
 
@@ -138,7 +138,7 @@ public class CaptchaService {
             messageService.deleteUserMessages(chatId, userId);
 
         } else {
-            log.warn("ID пользователя не совпадает с ID в Callback " + userId + " != " + targetUserId);
+            log.warn("ID пользователя не совпадает с ID в Callback {} != {}", userId, targetUserId);
         }
     }
 

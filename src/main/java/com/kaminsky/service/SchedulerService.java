@@ -58,5 +58,6 @@ public class SchedulerService {
         executorService.scheduleAtFixedRate(() -> {
             userService.clearBannedUsers();
         }, interval, interval, timeUnit);
+        log.info("Внутренний список бота забаненных очищен");
     }
     }

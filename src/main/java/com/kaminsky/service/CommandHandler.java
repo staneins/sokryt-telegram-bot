@@ -124,12 +124,11 @@ public class CommandHandler {
             messageService.sendMessage(chatId, "Чего надо?", message.getMessageId());
         }
 
-        handleIncomingWelcomeTextSettingMessage(message);
-        handleIncomingRecurrentTextSettingMessage(message);
-        handleUnbanPetition(message);
-        handleIncomingKeyWordsMessage(message);
-
         if (isPrivateChat) {
+            handleIncomingWelcomeTextSettingMessage(message);
+            handleIncomingRecurrentTextSettingMessage(message);
+            handleUnbanPetition(message);
+            handleIncomingKeyWordsMessage(message);
         switch (messageText) {
             case "сайт проекта":
                 String projectLink = "[Сайт проекта «Сокрытая Русь»](https://sokryt.ru)";
@@ -180,6 +179,7 @@ public class CommandHandler {
         org.telegram.telegrambots.meta.api.objects.User leftUser = message.getLeftChatMember();
         long chatId = message.getChatId();
         messageService.sayFarewellToUser(chatId, leftUser.getId(), leftUser.getFirstName(), message.getMessageId());
+        log.info("Прощаемся с пользователем {} : {}", leftUser.getFirstName(), leftUser.getId());
     }
 
     public void handleIncomingKeyWordsMessage(Message message) {
@@ -196,6 +196,7 @@ public class CommandHandler {
             userService.setAwaitingKeyWords(false);
             messageService.sendMessage(chatId, "Слова-триггеры успешно выставлены");
         }
+        log.info("Выставили слова-триггеры");
     }
 
     public void handleIncomingWelcomeTextSettingMessage(Message message) {
@@ -208,6 +209,7 @@ public class CommandHandler {
             messageService.sendMessage(chatId, "Приветственное сообщение успешно сохранено!");
             userService.setCommandHandled(true);
         }
+        log.info("Выставили привественное сообщение");
     }
 
     public void handleIncomingRecurrentTextSettingMessage(Message message) {
@@ -220,6 +222,7 @@ public class CommandHandler {
             messageService.sendMessage(chatId, "Рекуррентное сообщение успешно сохранено!");
             userService.setCommandHandled(true);
         }
+        log.info("Выставили рекуррентное сообщение");
     }
     public void handleUnbanPetition(Message message) {
         if (userService.isAwaitingUnbanPetition()) {
@@ -228,6 +231,7 @@ public class CommandHandler {
             messageService.sendMessage(chatId, "Ваше сообщение отправлено администрации. С Вами свяжутся");
             userService.setAwaitingUnbanPetition(false);
             userService.setCommandHandled(true);
+            log.info("Прошение о разбане отправлено от {}", chatId);
         }
     }
 

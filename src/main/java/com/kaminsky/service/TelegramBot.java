@@ -7,6 +7,9 @@ import com.kaminsky.model.repositories.ChatInfoRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
@@ -128,18 +131,49 @@ public class TelegramBot extends TelegramLongPollingBot {
         return false;
     }
 
+    @Cacheable(value = "chatInfo", key = "#chatId")
+    protected Optional<ChatInfo> getChatInfoFromCache(Long chatId) {
+        return chatInfoRepository.findById(chatId);
+    }
+
+    @CachePut(value = "chatInfo", key = "#chatInfo.chatId")
+    protected ChatInfo updateChatInfoCache(ChatInfo chatInfo) {
+        return chatInfoRepository.save(chatInfo);
+    }
+
+    @CacheEvict(value = "chatInfo", key = "#chatId")
+    protected void clearChatInfoCache(Long chatId) {
+        log.info("Кэш объектов ChatInfo с chatId {} очищен", chatId);
+    }
+
     private void registerChatInfo(Update update) {
         if (update.getMessage().getChat().getTitle() != null) {
             Long chatId = update.getMessage().getChatId();
             String chatTitle = update.getMessage().getChat().getTitle();
-            if (!chatInfoRepository.existsById(chatId) || !chatInfoRepository.findById(chatId).get().getChatTitle().equals(chatTitle)) {
+
+            Optional<ChatInfo> cachedChatInfo = getChatInfoFromCache(chatId);
+            boolean needUpdate = false;
+
+            if (cachedChatInfo.isEmpty()) {
+                needUpdate = true;
+            } else if (!cachedChatInfo.get().getChatTitle().equals(chatTitle)) {
+                needUpdate = true;
+            }
+
+            if (!needUpdate) {
+                log.info("Вернули объект ChatInfo из кэша {} : {}", cachedChatInfo.get().getChatId(), cachedChatInfo.get().getChatTitle());
+            }
+
+            if (needUpdate) {
                 ChatInfo chatInfo = new ChatInfo();
                 chatInfo.setChatTitle(chatTitle);
                 chatInfo.setChatId(chatId);
-                chatInfoRepository.save(chatInfo);
+                updateChatInfoCache(chatInfo);
+                log.info("Записали новый объект ChatInfo {} : {}", chatInfo.getChatId(), chatInfo.getChatTitle());
             }
         }
     }
+
 
     @EventListener
     public void handleSendMessageEvent(SendMessageEvent event) {
