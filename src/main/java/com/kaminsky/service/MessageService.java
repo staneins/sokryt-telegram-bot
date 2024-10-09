@@ -11,6 +11,7 @@ import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
@@ -30,12 +31,14 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 
 
 @Slf4j
 @Service
 public class MessageService {
 
+    private final Map<Long, List<Message>> chatMessages = new ConcurrentHashMap<>();
     private final Map<Long, List<Message>> userMessages = new ConcurrentHashMap<>();
     private final ApplicationEventPublisher eventPublisher;
 
@@ -217,6 +220,17 @@ public class MessageService {
         }
     }
 
+    public ChatMember executeGetChatMember(GetChatMember getChatMember) {
+        CompletableFuture<ChatMember> future = new CompletableFuture<>();
+        eventPublisher.publishEvent(new GetChatMemberEvent(getChatMember, future));
+        try {
+            return future.get();
+        } catch (InterruptedException | ExecutionException e) {
+            log.error("Ошибка при получении пользователя чата: {}", e.getMessage());
+            return null;
+        }
+    }
+
     public void executeMessage(SendMessage message) {
         eventPublisher.publishEvent(new SendMessageEvent(message));
         log.info("Публикация события SendMessageEvent для executeMessage");
@@ -293,6 +307,21 @@ public class MessageService {
         userMessages.get(userId).add(message);
     }
 
+    public void addMessage(Long chatId, Message message) {
+        chatMessages.putIfAbsent(chatId, new ArrayList<>());
+        chatMessages.get(chatId).add(message);
+    }
+
+    public Map<Long, List<Message>> getAllMessages(Long chatId) {
+        return chatMessages.entrySet().stream()
+                .filter(entry -> entry.getKey().equals(chatId))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+
+    public void clearAllMessages(Long chatId) {
+        chatMessages.remove(chatId);
+    }
+
     public void deleteUserMessages(Long chatId, Long userId) {
         for (Map.Entry<Long, List<Message>> entry : userMessages.entrySet()) {
             if (entry.getKey().equals(userId)) {
@@ -304,6 +333,7 @@ public class MessageService {
                     eventPublisher.publishEvent(new DeleteMessageEvent(deleteMessage));
                     log.info("Публикация события DeleteMessageEvent для удаления сообщения ID {}", message.getMessageId());
                 }
+                clearUserMessages();
                 messages.clear();
             }
         }

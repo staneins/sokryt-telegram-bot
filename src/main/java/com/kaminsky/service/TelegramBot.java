@@ -13,8 +13,8 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
-import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChat;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatAdministrators;
+import org.telegram.telegrambots.meta.api.methods.groupadministration.GetChatMember;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.RestrictChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendAnimation;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -79,6 +79,7 @@ public class TelegramBot extends TelegramLongPollingBot {
         adminChatCommands.add(new BotCommand("/warn", "Предупредить пользователя"));
         adminChatCommands.add(new BotCommand("/check", "посмотреть количество предупреждений"));
         adminChatCommands.add(new BotCommand("/reset", "сбросить предупреждения"));
+        adminChatCommands.add(new BotCommand("/update", "обновить список администраторов"));
         adminChatCommands.add(new BotCommand("/wipe", "очистить историю сообщений"));
 
         try {
@@ -95,18 +96,18 @@ public class TelegramBot extends TelegramLongPollingBot {
             Long chatId = update.getMessage().getChatId();
             if (!isNewChatMemberSokrytBot(update)) {
                 captchaService.popupCaptcha(update, chatId);
+                userService.collectUserMessage(update.getMessage().getFrom().getId(), update.getMessage());
             }
         }
 
         if (update.hasMessage()) {
             Message message = update.getMessage();
-            userService.collectUserMessage(message.getFrom().getId(), message);
+            Long chatId = update.getMessage().getChatId();
+            userService.collectAllMessages(chatId, message);
             if (message.getLeftChatMember() != null && !userService.getBannedUsers().contains(message.getLeftChatMember().getId())) {
                 commandHandler.sayFarewellToUser(message);
             }
-            long chatId = update.getMessage().getChatId();
             if (update.getMessage().getChat().isGroupChat() || update.getMessage().getChat().isSuperGroupChat()) {
-                chatAdminService.registerAdministrators(chatId);
                 registerChatInfo(update);
             }
             commandHandler.handleMessage(update.getMessage());
@@ -131,12 +132,12 @@ public class TelegramBot extends TelegramLongPollingBot {
         if (update.getMessage().getChat().getTitle() != null) {
             Long chatId = update.getMessage().getChatId();
             String chatTitle = update.getMessage().getChat().getTitle();
-
+            if (!chatInfoRepository.existsById(chatId) || !chatInfoRepository.findById(chatId).get().getChatTitle().equals(chatTitle)) {
                 ChatInfo chatInfo = new ChatInfo();
                 chatInfo.setChatTitle(chatTitle);
                 chatInfo.setChatId(chatId);
                 chatInfoRepository.save(chatInfo);
-
+            }
         }
     }
 
@@ -144,20 +145,28 @@ public class TelegramBot extends TelegramLongPollingBot {
     public void handleSendMessageEvent(SendMessageEvent event) {
         SendMessage message = event.getSendMessage();
         try {
-            execute(message);
-            log.info("Сообщение отправлено в чат " + message.getChatId());
+            Message sentMessage = execute(message);
+            if (sentMessage != null) {
+                Long chatId = sentMessage.getChatId();
+                userService.collectAllMessages(chatId, sentMessage);
+                log.info("Сообщение отправлено в чат {}", message.getChatId());
+            }
         } catch (TelegramApiException e) {
-            log.error("Ошибка при отправке сообщения: " + e.getMessage());
+            log.error("Ошибка при отправке сообщения: {}", e.getMessage());
         }
     }
+
 
     @EventListener
     public void handleSendCaptchaMessageEvent(SendCaptchaMessageEvent event) {
         SendMessage message = event.getSendMessage();
         try {
             Message sentMessage = execute(message);
-            log.info("Сообщение-каптча отправлено в чат {}", message.getChatId());
-
+            if (sentMessage != null) {
+                Long chatId = sentMessage.getChatId();
+                userService.collectAllMessages(chatId, sentMessage);
+                log.info("Сообщение-каптча отправлено в чат {}", message.getChatId());
+            }
             event.setMessageId(sentMessage.getMessageId());
         } catch (TelegramApiException e) {
             log.error("Ошибка при отправке сообщения-каптчи: {}", e.getMessage());
@@ -168,8 +177,12 @@ public class TelegramBot extends TelegramLongPollingBot {
     public void handleEditMessageTextEvent(EditMessageTextEvent event) {
         EditMessageText editMessageText = event.getEditMessageText();
         try {
-            execute(editMessageText);
-            log.info("Сообщение отредактировано в чате " + editMessageText.getChatId());
+            Message sentMessage = (Message) execute(editMessageText);
+            if (sentMessage != null) {
+                Long chatId = sentMessage.getChatId();
+                userService.collectAllMessages(chatId, sentMessage);
+                log.info("Сообщение отредактировано в чате " + editMessageText.getChatId());
+            }
         } catch (TelegramApiException e) {
             log.error("Ошибка при редактировании сообщения: " + e.getMessage());
         }
@@ -223,8 +236,12 @@ public class TelegramBot extends TelegramLongPollingBot {
     public void handleSendAnimationEvent(SendAnimationEvent event) {
         SendAnimation sendAnimation = event.getSendAnimation();
         try {
-            execute(sendAnimation);
-            log.info("GIF отправлен в чат " + sendAnimation.getChatId());
+            Message sentMessage = execute(sendAnimation);
+            if (sentMessage != null) {
+                Long chatId = sentMessage.getChatId();
+                userService.collectAllMessages(chatId, sentMessage);
+                log.info("GIF отправлен в чат " + sendAnimation.getChatId());
+            }
         } catch (TelegramApiException e) {
             log.error("Ошибка при отправке GIF: " + e.getMessage());
         }
@@ -240,6 +257,20 @@ public class TelegramBot extends TelegramLongPollingBot {
             future.complete(administrators);
         } catch (TelegramApiException e) {
             log.error("Ошибка при получении администраторов чата: " + e.getMessage());
+            future.completeExceptionally(e);
+        }
+    }
+
+    @EventListener
+    public void handleGetChatMemberEvent(GetChatMemberEvent event) {
+        GetChatMember getChatMember = event.getGetChatMember();
+        CompletableFuture<ChatMember> future = event.getFuture();
+        try {
+            ChatMember chatMember = execute(getChatMember);
+            log.info("Получен пользователь {}", chatMember.toString());
+            future.complete(chatMember);
+        } catch (TelegramApiException e) {
+            log.error("Ошибка при получении пользователя: {}", e.getMessage());
             future.completeExceptionally(e);
         }
     }

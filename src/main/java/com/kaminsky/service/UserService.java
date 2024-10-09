@@ -29,6 +29,7 @@ public class UserService {
     private boolean isAwaitingUnbanPetition = false;
     private boolean isAwaitingWelcomeText = false;
     private boolean isAwaitingRecurrentText = false;
+    private boolean isAwaitingKeyWords = false;
 
     private final Set<Long> bannedUsers = Collections.synchronizedSet(new HashSet<>());
     private final Map<Long, Boolean> userCaptchaStatus = new ConcurrentHashMap<>();
@@ -107,6 +108,10 @@ public class UserService {
         messageService.addUserMessage(chatId, message);
     }
 
+    public void collectAllMessages(Long chatId, Message message) {
+        messageService.addMessage(chatId, message);
+    }
+
     public void setUserCaptchaStatus(Long chatId, Boolean isPassedCaptcha) {
         userCaptchaStatus.put(chatId, isPassedCaptcha);
     }
@@ -150,6 +155,14 @@ public class UserService {
 
     public void setAwaitingRecurrentText(boolean awaitingRecurrentText) {
         isAwaitingRecurrentText = awaitingRecurrentText;
+    }
+
+    public boolean isAwaitingKeyWords() {
+        return isAwaitingKeyWords;
+    }
+
+    public void setAwaitingKeyWords(boolean awaitingKeyWords) {
+        isAwaitingKeyWords = awaitingKeyWords;
     }
 
     public boolean isAwaitingWelcomeText() {

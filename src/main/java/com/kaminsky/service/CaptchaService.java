@@ -135,6 +135,7 @@ public class CaptchaService {
             editMessage.setParseMode("MarkdownV2");
 
             messageService.executeEditMessage(editMessage);
+            messageService.deleteUserMessages(chatId, userId);
 
         } else {
             log.warn("ID пользователя не совпадает с ID в Callback " + userId + " != " + targetUserId);

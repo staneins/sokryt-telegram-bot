@@ -8,7 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
-import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
 import java.util.List;
@@ -95,9 +94,14 @@ public class CommandHandler {
                 case "/warn@sokrytbot":
                 case "/check@sokrytbot":
                 case "/reset@sokrytbot":
-                case "/wipe@sokrytbot":
-                    adminService.handleAdminCommand(chatId, userId, messageText, message);
+                    adminService.handleAdminCommandWithReply(chatId, userId, messageText, message);
                     break;
+                case "/wipe@sokrytbot":
+                adminService.wipeAllMessages(chatId, message);
+                    break;
+                case "/update@sokrytbot":
+                adminService.updateCommandReceived(chatId, message);
+                break;
                 default:
                     messageService.sendMessage(chatId, BotFinalVariables.UNKNOWN_COMMAND, message.getMessageId());
                     break;
@@ -110,6 +114,7 @@ public class CommandHandler {
         Long chatId = message.getChatId();
         String messageText = message.getText();
         Boolean isPrivateChat = message.getChat().isUserChat();
+        Boolean isGroupChat = message.getChat().isGroupChat() || message.getChat().isSuperGroupChat();
 
         String botUsername = config.getBotName();
         Boolean isBotMentioned = messageText.contains("@" + botUsername);
@@ -122,6 +127,7 @@ public class CommandHandler {
         handleIncomingWelcomeTextSettingMessage(message);
         handleIncomingRecurrentTextSettingMessage(message);
         handleUnbanPetition(message);
+        handleIncomingKeyWordsMessage(message);
 
         if (isPrivateChat) {
         switch (messageText) {
@@ -158,12 +164,17 @@ public class CommandHandler {
         }
         }
 
-        List<String> keyWords = getKeyWords();
-        if (isContainKeyWords(keyWords, messageText)) {
-            messageService.sendRandomGif(chatId);
-            adminService.muteUser(chatId, message.getFrom().getId(), message.getFrom().getFirstName(), message, true);
+        if (isGroupChat) {
+            List<String> keyWords = getKeyWords();
+            if (isContainKeyWords(keyWords, messageText)) {
+                messageService.sendRandomGif(chatId);
+                adminService.muteUser(chatId, message.getFrom().getId(), message.getFrom().getFirstName(), message, true);
+            }
         }
-    }
+
+        }
+
+
 
     public void sayFarewellToUser(Message message) {
         org.telegram.telegrambots.meta.api.objects.User leftUser = message.getLeftChatMember();
@@ -171,6 +182,21 @@ public class CommandHandler {
         messageService.sayFarewellToUser(chatId, leftUser.getId(), leftUser.getFirstName(), message.getMessageId());
     }
 
+    public void handleIncomingKeyWordsMessage(Message message) {
+        if (userService.isAwaitingKeyWords()) {
+            Long chatId = message.getChatId();
+            String text = message.getText();
+            String[] words = text.split(",");
+            for (String word : words) {
+                KeyWord keyWord = new KeyWord();
+                keyWord.setKeyWord(word.trim());
+                keyWordRepository.save(keyWord);
+            }
+            userService.setCommandHandled(true);
+            userService.setAwaitingKeyWords(false);
+            messageService.sendMessage(chatId, "Слова-триггеры успешно выставлены");
+        }
+    }
 
     public void handleIncomingWelcomeTextSettingMessage(Message message) {
         Long chatId = message.getChatId();

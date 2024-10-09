@@ -31,6 +31,10 @@ public class CallbackQueryHandler {
             adminService.handleSetRecurrentText(callbackQuery);
         } else if (data.startsWith(BotFinalVariables.UNMUTE_BUTTON)) {
             adminService.handleUnmuteCommandCallbackQuery(callbackQuery);
+        } else if (data.startsWith(BotFinalVariables.KEYS_BUTTON)) {
+            adminService.handleKeyWordsCallbackQuery(callbackQuery);
+        } else if (data.startsWith(BotFinalVariables.WIPE_KEYS_BUTTON)) {
+            adminService.wipeAllKeys(callbackQuery);
         } else {
             adminService.handleConfigCallbackQuery(callbackQuery);
         }
