@@ -279,13 +279,10 @@ public class MessageService {
     }
 
     public String fixMarkdownText(String text) {
+        // Экран символов, за исключением ссылок.
         return text
                 .replace("_", "\\_")
                 .replace("*", "\\*")
-                .replace("[", "\\[")
-                .replace("]", "\\]")
-                .replace("(", "\\(")
-                .replace(")", "\\)")
                 .replace("~", "\\~")
                 .replace("`", "\\`")
                 .replace(">", "\\>")

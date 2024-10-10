@@ -175,6 +175,6 @@ public class CaptchaService {
                 messageService.deleteUserMessages(chatId, userId);
                 schedulerService.startBannedUsersCleanupTask(1, TimeUnit.MINUTES);
             }
-        }, 30, TimeUnit.SECONDS);
+        }, 3, TimeUnit.MINUTES);
     }
 }
