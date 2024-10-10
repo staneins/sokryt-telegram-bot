@@ -55,40 +55,6 @@ public class UserService {
         this.botConfig = botConfig;
     }
 
-    public void registerUser(Message message) {
-        if (message != null && message.getChat() != null) {
-            Long chatId = message.getFrom().getId();
-
-            Optional<User> cachedUser = getUserFromCache(chatId);
-            boolean needUpdate = false;
-
-            if (cachedUser.isEmpty()) {
-                needUpdate = true;
-            } else if (!cachedUser.get().getUserName().equals(message.getChat().getUserName())) {
-                needUpdate = true;
-            }
-
-            if (!needUpdate) {
-                log.info("Вернули пользователя из кэша {} : {}", cachedUser.get().getFirstName(), cachedUser.get().getChatId());
-            }
-
-            if (needUpdate) {
-                User user = new User();
-                user.setChatId(chatId);
-                user.setFirstName(message.getChat().getFirstName());
-                user.setLastName(message.getChat().getLastName());
-                user.setUserName(message.getChat().getUserName());
-                user.setRegisteredAt(new Timestamp(System.currentTimeMillis()));
-
-                updateUserCache(user);
-                log.info("Записали нового пользователя: {} : {}", user.getFirstName(), user.getChatId());
-            }
-        } else {
-            log.warn("Попытка зарегистрировать пользователя с пустым сообщением или чатом");
-        }
-    }
-
-
     @Cacheable(value = "users", key = "#chatId")
     protected Optional<User> getUserFromCache(Long chatId) {
         return userRepository.findById(chatId);
@@ -102,14 +68,6 @@ public class UserService {
     @CacheEvict(value = "users", key = "#chatId")
     protected void clearUserCache(Long chatId) {
         log.info("Кэш пользователя с chatId {} очищен", chatId);
-    }
-
-    public User getOrRegisterWarnedUser(Message message, Long warnedUserId) {
-        if (message.getReplyToMessage() != null) {
-            registerUser(message.getReplyToMessage());
-            return userRepository.findById(warnedUserId).orElse(null);
-        }
-        return null;
     }
 
     public void sendToAllUsers(String textToSend) {

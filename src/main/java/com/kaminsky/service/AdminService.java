@@ -23,6 +23,7 @@ import org.telegram.telegrambots.meta.api.objects.chatmember.ChatMemberBanned;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -126,46 +127,51 @@ public class AdminService {
     }
 
     public void configCommandReceived(Long chatId, Long userId, Long botId) {
-        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-        List<Long> menuChatIds = new ArrayList<>();
-        for (Map.Entry<Long, List<Long>> entry : chatAdminService.getChatAdministrators().entrySet()) {
-            Long key = entry.getKey();
-            List<Long> adminList = entry.getValue();
-            if (adminList.contains(userId) && (adminList.contains(botId))) {
-                menuChatIds.add(key);
-            }
-        }
-        if (!menuChatIds.isEmpty()) {
-            SendMessage message = new SendMessage();
-            message.setChatId(chatId);
-            message.setText("Какой чат вы хотите настроить?");
-            List<InlineKeyboardButton> rowInLine = new ArrayList<>();
-            for (Long menuChatId : menuChatIds) {
-                InlineKeyboardButton button = new InlineKeyboardButton();
-
-                button.setCallbackData(menuChatId.toString());
-                Optional<ChatInfo> chatInfo = chatInfoRepository.findById(menuChatId);
-                if (!chatInfo.isEmpty()) {
-                    button.setText(chatInfo.get().getChatTitle());
+        if (chatAdminService.isAdmin(userId)) {
+            InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+            List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+            List<Long> menuChatIds = new ArrayList<>();
+            for (Map.Entry<Long, List<Long>> entry : chatAdminService.getChatAdministrators().entrySet()) {
+                Long key = entry.getKey();
+                List<Long> adminList = entry.getValue();
+                if (adminList.contains(userId) && (adminList.contains(botId))) {
+                    menuChatIds.add(key);
                 }
-                rowInLine.add(button);
             }
+            if (!menuChatIds.isEmpty()) {
+                SendMessage message = new SendMessage();
+                message.setChatId(chatId);
+                message.setText("Какой чат вы хотите настроить?");
+                List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+                for (Long menuChatId : menuChatIds) {
+                    InlineKeyboardButton button = new InlineKeyboardButton();
 
-            InlineKeyboardButton keysButton = new InlineKeyboardButton();
-            keysButton.setCallbackData(BotFinalVariables.KEYS_BUTTON);
-            keysButton.setText("Настроить триггеры");
-            rowInLine.add(keysButton);
+                    button.setCallbackData(menuChatId.toString());
+                    Optional<ChatInfo> chatInfo = chatInfoRepository.findById(menuChatId);
+                    if (!chatInfo.isEmpty()) {
+                        button.setText(chatInfo.get().getChatTitle());
+                    }
+                    rowInLine.add(button);
+                }
 
-            InlineKeyboardButton wipeKeysButton = new InlineKeyboardButton();
-            wipeKeysButton.setCallbackData(BotFinalVariables.WIPE_KEYS_BUTTON);
-            wipeKeysButton.setText("Удалить триггеры");
-            rowInLine.add(wipeKeysButton);
+                InlineKeyboardButton keysButton = new InlineKeyboardButton();
+                keysButton.setCallbackData(BotFinalVariables.KEYS_BUTTON);
+                keysButton.setText("Настроить триггеры");
+                rowInLine.add(keysButton);
 
-            rows.add(rowInLine);
-            markup.setKeyboard(rows);
-            message.setReplyMarkup(markup);
-            messageService.executeMessage(message);
+                InlineKeyboardButton wipeKeysButton = new InlineKeyboardButton();
+                wipeKeysButton.setCallbackData(BotFinalVariables.WIPE_KEYS_BUTTON);
+                wipeKeysButton.setText("Удалить триггеры");
+                rowInLine.add(wipeKeysButton);
+
+                rows.add(rowInLine);
+                markup.setKeyboard(rows);
+                message.setReplyMarkup(markup);
+                messageService.executeMessage(message);
+            }
+        } else {
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
+            log.info("Пользователь {} неуспешно пытался активировать настройки", userId);
         }
     }
 
@@ -176,6 +182,52 @@ public class AdminService {
         } else {
             messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }
+    }
+
+    public void registerUser(Message message) {
+        if (message != null && message.getChat() != null) {
+            Long chatId = message.getFrom().getId();
+
+            Optional<User> cachedUser = userService.getUserFromCache(chatId);
+            boolean needUpdate = false;
+
+            if (cachedUser.isEmpty()) {
+                needUpdate = true;
+            } else if (!cachedUser.get().getUserName().equals(message.getFrom().getUserName())) {
+                needUpdate = true;
+            }
+
+            if (!needUpdate) {
+                log.info("Вернули пользователя из кэша {} : {}", cachedUser.get().getFirstName(), cachedUser.get().getChatId());
+            }
+
+            if (needUpdate) {
+                User user = new User();
+                user.setChatId(chatId);
+                user.setFirstName(message.getFrom().getFirstName());
+                user.setLastName(message.getFrom().getLastName());
+                user.setUserName(message.getFrom().getUserName());
+                user.setRegisteredAt(new Timestamp(System.currentTimeMillis()));
+
+                userService.updateUserCache(user);
+                log.info("Записали нового пользователя: {} : {}", user.getFirstName(), user.getChatId());
+            }
+        } else {
+            log.warn("Попытка зарегистрировать пользователя с пустым сообщением или чатом");
+        }
+    }
+
+    public User getOrRegisterWarnedUser(Message message, Long warnedUserId) {
+        if (message.getReplyToMessage() != null) {
+            registerUser(message.getReplyToMessage());
+            return userRepository.findById(warnedUserId).orElse(null);
+        }
+        return null;
+    }
+
+    public User getOrRegisterTriggeredUser(Message message, Long warnedUserId) {
+        registerUser(message);
+        return userRepository.findById(warnedUserId).orElse(null);
     }
 
     public void handleSetRecurrentText(CallbackQuery callbackQuery) {
@@ -240,7 +292,7 @@ public class AdminService {
     public void warnUser(Long chatId, Long commandSenderId, Long warnedUserId, String warnedUserNickname, Message message) {
         if (chatAdminService.isAdmin(chatId, commandSenderId)) {
             if (!isUserAlreadyBanned(warnedUserId, chatId)) {
-                User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
+                User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
                 if (warnedUser != null) {
                     Byte warnsCount = warnedUser.getNumberOfWarns();
                     if (warnsCount == null) {
@@ -281,7 +333,7 @@ public class AdminService {
 
     public void checkWarns(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
         if (chatAdminService.isAdmin(chatId, message.getFrom().getId())) {
-            User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
+            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
             if (warnedUser != null) {
                 Byte warnsCount = warnedUser.getNumberOfWarns();
                 if (warnsCount == null) {
@@ -300,7 +352,7 @@ public class AdminService {
 
     public void resetWarns(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
         if (chatAdminService.isAdmin(chatId, message.getFrom().getId())) {
-            User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
+            User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
             if (warnedUser != null) {
                 warnedUser.setNumberOfWarns((byte) 0);
                 userRepository.save(warnedUser);
@@ -337,14 +389,19 @@ public class AdminService {
         Long chatId = Long.parseLong(callbackData.split(":")[1]);
         Long userId = Long.parseLong(callbackData.split(":")[2]);
         String userNickname = callbackData.split(":")[3];
-
-        unmuteUser(chatId, userId, userNickname, callbackQuery.getMessage(), true);
+        Long userPressingTheButtonId = callbackQuery.getFrom().getId();
+        if (chatAdminService.isAdmin(chatId, userPressingTheButtonId)) {
+            unmuteUser(chatId, userId, userNickname, callbackQuery.getMessage(), true);
+        } else {
+            messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
+            log.info("Пользователь {} попытался размьютить пользователя {} не обладая правами администратора", userPressingTheButtonId, userId);
+        }
     }
 
     public void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message) {
         if (chatAdminService.isAdmin(chatId, message.getFrom().getId())) {
             if (!isUserAlreadyBanned(warnedUserId, chatId)) {
-                User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
+                User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
                 if (warnedUser != null) {
                     Duration muteDuration = Duration.ofDays(1);
                     RestrictChatMember restrictChatMember = new RestrictChatMember();
@@ -381,8 +438,9 @@ public class AdminService {
 
     public void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message, boolean isAdmin) {
         if (isAdmin) {
-            User warnedUser = userService.getOrRegisterWarnedUser(message, warnedUserId);
+            User warnedUser = getOrRegisterTriggeredUser(message, warnedUserId);
             if (warnedUser != null) {
+                if (!chatAdminService.isAdmin(chatId, warnedUserId)) {
                 Duration muteDuration = Duration.ofDays(1);
                 RestrictChatMember restrictChatMember = new RestrictChatMember();
                 restrictChatMember.setChatId(chatId.toString());
@@ -407,7 +465,10 @@ public class AdminService {
 
                 messageService.sendHTMLMessageWithKeyboard(chatId, text, markup, message.getMessageId());
                 log.info("Пользователь {} обеззвучен на сутки.", warnedUserNickname);
-            }
+            } else {
+                    messageService.sendMessage(chatId, BotFinalVariables.IS_ADMIN_ERROR);
+        }
+        }
         } else {
             messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR);
         }

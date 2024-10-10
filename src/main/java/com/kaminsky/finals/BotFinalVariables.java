@@ -17,6 +17,7 @@ public final class BotFinalVariables {
     public static final String ERROR = "Ошибка ";
     public static final String UNKNOWN_COMMAND = "Мне незнакома эта команда";
     public static final String NOT_AN_ADMIN_ERROR = "Для этого нужны права администратора";
+    public static final String IS_ADMIN_ERROR = "Ошибка. Пользователья является администратором чата";
     public static final String USER_BANNED = "Пользователь уже забанен";
 }
 

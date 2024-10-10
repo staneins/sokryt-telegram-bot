@@ -68,7 +68,7 @@ public class CommandHandler {
 
             switch (messageText) {
                 case "/start":
-                    userService.registerUser(message);
+                    adminService.registerUser(message);
                     messageService.startCommandReceived(chatId, message.getChat().getFirstName());
                     break;
                 case "/help":

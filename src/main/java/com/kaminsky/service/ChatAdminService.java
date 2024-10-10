@@ -46,6 +46,13 @@ public class ChatAdminService {
         return admins != null && admins.contains(userId);
     }
 
+    public boolean isAdmin(Long userId) {
+        return chatAdministrators.values().stream()
+                .flatMap(List::stream)
+                .anyMatch(admin -> admin.equals(userId));
+    }
+
+
     public Map<Long, List<Long>> getChatAdministrators() {
         return chatAdministrators;
     }
