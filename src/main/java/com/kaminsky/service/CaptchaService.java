@@ -6,6 +6,7 @@ import com.kaminsky.model.repositories.BotMessageRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.groupadministration.BanChatMember;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -116,8 +117,9 @@ public class CaptchaService {
         String userLink = "[" + userFirstName + "](tg://user?id=" + userId + ")";
 
         if (targetUserId.equals(userId)) {
+            log.info("Получаем приветственное сообщение для чата с ID {}", chatId);
             userService.setUserCaptchaStatus(userId, true);
-            Optional<BotMessage> botMessageOptional = botMessageRepository.findById(chatId);
+            Optional<BotMessage> botMessageOptional = getBotMessageById(chatId);
             String welcomeMessage = botMessageOptional
                     .map(BotMessage::getWelcomeMessage)
                     .orElse("");
@@ -140,6 +142,13 @@ public class CaptchaService {
         } else {
             log.warn("ID пользователя не совпадает с ID в Callback {} != {}", userId, targetUserId);
         }
+    }
+
+    @Cacheable(value = "botMessageCache", key = "#chatId")
+    protected Optional<BotMessage> getBotMessageById(Long chatId) {
+        Optional<BotMessage> botMessageOptional = botMessageRepository.findById(chatId);
+        log.info("Берем объект BotMessage из БД");
+        return botMessageOptional;
     }
 
     public void handleCaptchaTimeout(Long chatId, Long userId, Integer messageId) {

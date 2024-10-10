@@ -6,6 +6,7 @@ import com.kaminsky.model.KeyWord;
 import com.kaminsky.model.repositories.KeyWordRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.objects.Message;
@@ -164,7 +165,7 @@ public class CommandHandler {
         }
 
         if (isGroupChat) {
-            List<String> keyWords = getKeyWords();
+            List<String> keyWords = getKeyWordsList();
             if (isContainKeyWords(keyWords, messageText)) {
                 messageService.sendRandomGif(chatId);
                 adminService.muteUser(chatId, message.getFrom().getId(), message.getFrom().getFirstName(), message, true);
@@ -172,7 +173,6 @@ public class CommandHandler {
         }
 
         }
-
 
 
     public void sayFarewellToUser(Message message) {
@@ -195,8 +195,8 @@ public class CommandHandler {
             userService.setCommandHandled(true);
             userService.setAwaitingKeyWords(false);
             messageService.sendMessage(chatId, "Слова-триггеры успешно выставлены");
+            log.info("Выставили слова-триггеры");
         }
-        log.info("Выставили слова-триггеры");
     }
 
     public void handleIncomingWelcomeTextSettingMessage(Message message) {
@@ -245,10 +245,7 @@ public class CommandHandler {
         return false;
     }
 
-    private List<String> getKeyWords() {
-        Iterable<KeyWord> keyWords = keyWordRepository.findAll();
-        return ((List<KeyWord>) keyWords).stream()
-                .map(KeyWord::getKeyWord)
-                .toList();
+    protected List<String> getKeyWordsList() {
+        return messageService.getKeyWords();
     }
 }

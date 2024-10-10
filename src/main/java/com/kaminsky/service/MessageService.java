@@ -2,9 +2,12 @@ package com.kaminsky.service;
 
 import com.kaminsky.events.*;
 import com.kaminsky.finals.BotFinalVariables;
+import com.kaminsky.model.KeyWord;
+import com.kaminsky.model.repositories.KeyWordRepository;
 import com.vdurmont.emoji.EmojiParser;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
@@ -31,6 +34,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 
 @Slf4j
@@ -40,10 +44,12 @@ public class MessageService {
     private final Map<Long, List<Message>> chatMessages = new ConcurrentHashMap<>();
     private final Map<Long, List<Message>> userMessages = new ConcurrentHashMap<>();
     private final ApplicationEventPublisher eventPublisher;
+    private final KeyWordRepository keyWordRepository;
 
     @Autowired
-    public MessageService(ApplicationEventPublisher eventPublisher) {
+    public MessageService(ApplicationEventPublisher eventPublisher, KeyWordRepository keyWordRepository) {
         this.eventPublisher = eventPublisher;
+        this.keyWordRepository = keyWordRepository;
     }
 
     public void startCommandReceived(Long chatId, String name) {
@@ -292,6 +298,15 @@ public class MessageService {
                 .replace("}", "\\}")
                 .replace(".", "\\.")
                 .replace("!", "\\!");
+    }
+
+    @Cacheable("keywordsCache")
+    protected List<String> getKeyWords() {
+        log.info("Взяли слова-триггеры из БД");
+        Iterable<KeyWord> keyWords = keyWordRepository.findAll();
+        return StreamSupport.stream(keyWords.spliterator(), false)
+                .map(KeyWord::getKeyWord)
+                .collect(Collectors.toList());
     }
 
     public Map<Long, List<Message>> getUserMessages() {

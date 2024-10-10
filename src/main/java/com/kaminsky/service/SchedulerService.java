@@ -36,7 +36,7 @@ public class SchedulerService {
             String recurrentMessage = botMessage.getRecurrentMessage();
             if (recurrentMessage != null && !recurrentMessage.trim().isEmpty()) {
                 String fixedMessage = recurrentMessage;
-                messageService.sendMarkdownMessage(chatId, fixedMessage);
+                messageService.sendMarkdownMessage(chatId, messageService.fixMarkdownText(fixedMessage));
                 log.info("Повторяющееся сообщение отправлено {}: {}", chatId, recurrentMessage);
             }
         }
