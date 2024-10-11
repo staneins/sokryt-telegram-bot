@@ -2,7 +2,6 @@ package com.kaminsky.service;
 
 import com.kaminsky.config.BotConfig;
 import com.kaminsky.model.BotMessage;
-import com.kaminsky.model.ChatInfo;
 import com.kaminsky.model.User;
 import com.kaminsky.model.repositories.BotMessageRepository;
 import com.kaminsky.model.repositories.UserRepository;
@@ -12,15 +11,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.ForwardMessage;
 import org.telegram.telegrambots.meta.api.objects.Message;
 
-import java.sql.Timestamp;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -56,12 +52,12 @@ public class UserService {
     }
 
     @Cacheable(value = "users", key = "#chatId")
-    protected Optional<User> getUserFromCache(Long chatId) {
+    public Optional<User> getUserFromCache(Long chatId) {
         return userRepository.findById(chatId);
     }
 
     @CachePut(value = "users", key = "#user.chatId")
-    protected User updateUserCache(User user) {
+    public User updateUserCache(User user) {
         return userRepository.save(user);
     }
 
@@ -138,6 +134,10 @@ public class UserService {
 
     public Set<Long> getBannedUsers() {
         return bannedUsers;
+    }
+
+    public boolean isUserBanned(Long userId) {
+        return bannedUsers.contains(userId);
     }
 
     public void clearBannedUsers() {

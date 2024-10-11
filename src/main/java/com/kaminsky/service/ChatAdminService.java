@@ -56,4 +56,8 @@ public class ChatAdminService {
     public Map<Long, List<Long>> getChatAdministrators() {
         return chatAdministrators;
     }
+
+    public void putIntoChatAdministrators(Long chatId, List<Long> userIds) {
+        chatAdministrators.put(chatId, userIds);
+    }
 }
