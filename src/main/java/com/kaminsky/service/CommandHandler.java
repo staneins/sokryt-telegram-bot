@@ -111,7 +111,7 @@ public class CommandHandler {
     }
 
 
-    private void handleNonCommandMessage(Message message) {
+    public void handleNonCommandMessage(Message message) {
         Long chatId = message.getChatId();
         String messageText = message.getText();
         Boolean isPrivateChat = message.getChat().isUserChat();

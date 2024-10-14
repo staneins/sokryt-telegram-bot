@@ -403,30 +403,34 @@ public class AdminService {
             if (!isUserAlreadyBanned(warnedUserId, chatId)) {
                 User warnedUser = getOrRegisterWarnedUser(message, warnedUserId);
                 if (warnedUser != null) {
-                    Duration muteDuration = Duration.ofDays(1);
-                    RestrictChatMember restrictChatMember = new RestrictChatMember();
-                    restrictChatMember.setChatId(chatId.toString());
-                    restrictChatMember.setUserId(warnedUserId);
-                    restrictChatMember.setPermissions(new ChatPermissions());
-                    restrictChatMember.forTimePeriodDuration(muteDuration);
-                    messageService.executeRestrictChatMember(restrictChatMember);
+                    if (!chatAdminService.isAdmin(chatId, warnedUserId)) {
+                        Duration muteDuration = Duration.ofDays(1);
+                        RestrictChatMember restrictChatMember = new RestrictChatMember();
+                        restrictChatMember.setChatId(chatId.toString());
+                        restrictChatMember.setUserId(warnedUserId);
+                        restrictChatMember.setPermissions(new ChatPermissions());
+                        restrictChatMember.forTimePeriodDuration(muteDuration);
+                        messageService.executeRestrictChatMember(restrictChatMember);
 
-                    String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
+                        String text = "<a href=\"tg://user?id=" + warnedUserId + "\">" + warnedUserNickname + "</a> обеззвучен на сутки";
 
-                    InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
-                    List<List<InlineKeyboardButton>> rows = new ArrayList<>();
-                    List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+                        InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
+                        List<List<InlineKeyboardButton>> rows = new ArrayList<>();
+                        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
 
-                    InlineKeyboardButton unmuteButton = new InlineKeyboardButton();
-                    unmuteButton.setCallbackData(BotFinalVariables.UNMUTE_BUTTON + ":" + chatId + ":" + warnedUserId + ":" + warnedUserNickname);
-                    unmuteButton.setText("Снять ограничения");
+                        InlineKeyboardButton unmuteButton = new InlineKeyboardButton();
+                        unmuteButton.setCallbackData(BotFinalVariables.UNMUTE_BUTTON + ":" + chatId + ":" + warnedUserId + ":" + warnedUserNickname);
+                        unmuteButton.setText("Снять ограничения");
 
-                    rowInLine.add(unmuteButton);
-                    rows.add(rowInLine);
-                    markup.setKeyboard(rows);
+                        rowInLine.add(unmuteButton);
+                        rows.add(rowInLine);
+                        markup.setKeyboard(rows);
 
-                    messageService.sendHTMLMessageWithKeyboard(chatId, text, markup, message.getMessageId());
-                    log.info("Пользователь {} обеззвучен на сутки.", warnedUserNickname);
+                        messageService.sendHTMLMessageWithKeyboard(chatId, text, markup, message.getMessageId());
+                        log.info("Пользователь {} обеззвучен на сутки.", warnedUserNickname);
+                    } else {
+                        messageService.sendMessage(chatId, BotFinalVariables.IS_ADMIN_ERROR);
+                    }
                 }
             } else {
                 messageService.sendMessage(chatId, BotFinalVariables.USER_BANNED);
@@ -435,6 +439,8 @@ public class AdminService {
             messageService.sendMessage(chatId, BotFinalVariables.NOT_AN_ADMIN_ERROR, message.getMessageId());
         }
     }
+
+
 
     public void muteUser(Long chatId, Long warnedUserId, String warnedUserNickname, Message message, boolean isAdmin) {
         if (isAdmin) {
@@ -556,7 +562,7 @@ public class AdminService {
         }
     }
 
-    private boolean isUserAlreadyBanned(Long userId, Long chatId) {
+    public boolean isUserAlreadyBanned(Long userId, Long chatId) {
         GetChatMember getChatMember = new GetChatMember();
         getChatMember.setChatId(chatId.toString());
         getChatMember.setUserId(userId);

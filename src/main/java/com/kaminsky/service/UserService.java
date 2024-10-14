@@ -62,7 +62,7 @@ public class UserService {
     }
 
     @CacheEvict(value = "users", key = "#chatId")
-    protected void clearUserCache(Long chatId) {
+    public void clearUserCache(Long chatId) {
         log.info("Кэш пользователя с chatId {} очищен", chatId);
     }
 
