@@ -30,3 +30,5 @@ Currently, the bot has the following capabilities:
 - **Spring Boot**: Provides a powerful framework for application development and dependency injection.
 - **MySQL**: Database to store user and chat information.
 - **Redis**: Caching system for faster data access and to improve bot performance.
+- **JUnit**: For writing unit tests to ensure the functionality and reliability of the bot.
+- **Mockito**: For mocking dependencies in tests, allowing isolated testing of components.
